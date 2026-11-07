@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GrepoBot.Discord/GrepoBot.Discord.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GrepoBot.Discord.Tests/GrepoBot.Discord.Tests.csproj" />
+  </Folder>
+</Solution>
