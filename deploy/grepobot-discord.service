@@ -1,0 +1,30 @@
+[Unit]
+Description=GrepoBot Discord bot
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+User=grepobot
+Group=grepobot
+WorkingDirectory=/opt/grepobot-discord
+ExecStart=/opt/grepobot-discord/GrepoBot.Discord
+EnvironmentFile=/etc/grepobot-discord/grepobot-discord.env
+Environment=Bot__DataDirectory=/var/lib/grepobot-discord
+Environment=DOTNET_NOLOGO=1
+StateDirectory=grepobot-discord
+Restart=always
+RestartSec=10
+TimeoutStartSec=120
+
+# Hardening: the bot only needs the network and its state folder.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
