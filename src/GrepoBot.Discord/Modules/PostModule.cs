@@ -27,6 +27,8 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
     private const string PING_NONE = "0";
     private const string PING_ROLE = "1";
     private const string PING_EVERYONE = "e";
+    private const string RELEASE_TARGET_ID = "release-target";
+    private const string RELEASE_SEND_ID = "release-send";
 
     private readonly RepostService _repost;
     private readonly StateStore _store;
@@ -59,6 +61,98 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
             "📮 **Where should I post this message?**\n" + Describe(message),
             components: BuildPicker(message.Channel.Id, message.Id, null).Build(),
             ephemeral: true);
+    }
+
+    /// <summary>
+    /// Right click a draft → Apps → "Post as release": shows the release card built from the draft (version banner,
+    /// sections, images, thanks and download buttons), then posts it to the chosen channel.
+    /// </summary>
+    [MessageCommand("Post as release")]
+    public async Task PostReleaseAsync(IMessage message)
+    {
+        if (message is not IUserMessage draft)
+        {
+            await RespondAsync("❌ System messages cannot be posted.", ephemeral: true);
+            return;
+        }
+
+        if (ReleaseNotes.Parse(draft.Content, out var problem) is null)
+        {
+            await RespondAsync($"❌ {problem}\nWrite the draft like this, then try again:\n```\n{ReleaseNotes.TEMPLATE}\n```", ephemeral: true);
+            return;
+        }
+
+        await DeferAsync(ephemeral: true);
+        try
+        {
+            var (card, files) = await _repost.BuildReleaseAsync(draft, Context.Guild, null, DateTimeOffset.UtcNow);
+            try
+            {
+                await FollowupWithFilesAsync(files, components: card, ephemeral: true, flags: MessageFlags.ComponentsV2);
+            }
+            finally
+            {
+                MessageCards.DisposeAll(files);
+            }
+        }
+        catch (Exception ex) when (ex is RepostException or HttpException)
+        {
+            await FollowupAsync($"❌ {ErrorText(ex)}", ephemeral: true);
+            return;
+        }
+
+        var updates = Context.Guild.TextChannels.FirstOrDefault(c => ServerLayout.Matches(c.Name, ServerLayout.Channel("updates").Aliases));
+        var (content, components) = BuildReleaseControls(draft.Channel.Id, draft.Id, updates);
+        await FollowupAsync(content, components: components, ephemeral: true);
+    }
+
+    [ComponentInteraction(RELEASE_TARGET_ID + ":*:*")]
+    public async Task OnReleaseTargetSelectedAsync(string sourceChannelId, string sourceMessageId, string[] selected)
+    {
+        var component = (SocketMessageComponent)Context.Interaction;
+        var (content, components) = BuildReleaseControls(ulong.Parse(sourceChannelId), ulong.Parse(sourceMessageId), Context.Guild.GetTextChannel(ulong.Parse(selected[0])));
+        await component.UpdateAsync(p =>
+        {
+            p.Content = content;
+            p.Components = components;
+        });
+    }
+
+    [ComponentInteraction(RELEASE_SEND_ID + ":*:*:*:*")]
+    public async Task OnReleaseSendAsync(string sourceChannelId, string sourceMessageId, string targetChannelId, string ping)
+    {
+        var component = (SocketMessageComponent)Context.Interaction;
+        await component.UpdateAsync(p =>
+        {
+            p.Content = "⏳ Posting the release…";
+            p.Components = new ComponentBuilder().Build();
+        });
+
+        string result;
+        if (Context.Client.GetChannel(ulong.Parse(sourceChannelId)) is not IMessageChannel sourceChannel
+            || await sourceChannel.GetMessageAsync(ulong.Parse(sourceMessageId)) is not IUserMessage source)
+        {
+            result = "❌ The draft was deleted.";
+        }
+        else if (Context.Guild.GetTextChannel(ulong.Parse(targetChannelId)) is not { } target)
+        {
+            result = "❌ The target channel no longer exists.";
+        }
+        else
+        {
+            try
+            {
+                var posted = await _repost.PostReleaseAsync(source, target, ping == PING_ROLE ? GetUpdatesRole() : null, ping == PING_EVERYONE);
+                result = $"✅ Release posted to {target.Mention}: {posted.GetJumpUrl()}\n" +
+                    "-# Edited the draft? Right click it → Apps → **Update GrepoBot post**.";
+            }
+            catch (Exception ex) when (ex is RepostException or HttpException)
+            {
+                result = $"❌ {ErrorText(ex)}";
+            }
+        }
+
+        await ModifyOriginalResponseAsync(p => p.Content = result);
     }
 
     [MessageCommand("Update GrepoBot post")]
@@ -181,6 +275,53 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
             p.Content = content;
             p.Components = buttons.Build();
         });
+    }
+
+    /// <summary>The channel picker and post buttons under the release preview.</summary>
+    private (string Content, MessageComponent Components) BuildReleaseControls(ulong sourceChannelId, ulong sourceMessageId, SocketTextChannel? target)
+    {
+        var menu = new SelectMenuBuilder()
+            .WithCustomId($"{RELEASE_TARGET_ID}:{sourceChannelId}:{sourceMessageId}")
+            .WithType(ComponentType.ChannelSelect)
+            .WithChannelTypes(ChannelType.Text, ChannelType.News)
+            .WithPlaceholder("Choose a channel")
+            .WithMinValues(1)
+            .WithMaxValues(1);
+        if (target is not null)
+        {
+            menu.WithDefaultValues(new SelectMenuDefaultValue(target.Id, SelectDefaultValueType.Channel));
+        }
+
+        var builder = new ComponentBuilder().WithSelectMenu(menu, row: 0);
+        if (target is null)
+        {
+            builder.WithButton("Cancel", CANCEL_ID, ButtonStyle.Secondary, row: 1);
+            return ("🚀 **This is how the release will look.** Where should I post it?", builder.Build());
+        }
+
+        var content = $"🚀 **This is how the release will look.** Post it to {target.Mention}?";
+        if (target is INewsChannel && _store.Read(s => s.AutoPublish))
+        {
+            content += "\n📣 It is an announcement channel, the release will be published to following servers.";
+        }
+
+        var missing = GetMissingPermissions(target);
+        if (missing.Count > 0)
+        {
+            content += $"\n⚠️ I am missing these permissions in {target.Mention}: **{string.Join(", ", missing)}**.";
+        }
+
+        var sendId = $"{RELEASE_SEND_ID}:{sourceChannelId}:{sourceMessageId}:{target.Id}";
+        builder
+            .WithButton("Post & ping @everyone", $"{sendId}:{PING_EVERYONE}", ButtonStyle.Success, new Emoji("📢"), row: 1)
+            .WithButton("Post", $"{sendId}:{PING_NONE}", ButtonStyle.Primary, new Emoji("📮"), row: 1);
+        if (GetUpdatesRole() is { } role)
+        {
+            builder.WithButton($"Post & ping @{role.Name}", $"{sendId}:{PING_ROLE}", ButtonStyle.Secondary, new Emoji("🔔"), row: 1);
+        }
+
+        builder.WithButton("Cancel", CANCEL_ID, ButtonStyle.Secondary, row: 1);
+        return (content, builder.Build());
     }
 
     private async Task<string> SendAsync(ulong sourceChannelId, ulong sourceMessageId, ulong targetChannelId, string ping, RepostColor color)

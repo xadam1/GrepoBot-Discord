@@ -267,6 +267,7 @@ public class FeedbackForumTests
             GrepoBot.Discord.Services.DirectMessageService.BuildText("GrepoBot", 1, 2),
             ServerLayout.RULES_TEXT,
             ServerLayout.TEMPLATES_GUIDELINES,
+            ReleaseNotes.THANKS_TEXT,
         };
         texts = texts
             .Concat(AppStatus.Looks.Values.Select(l => l.DefaultText))
@@ -405,4 +406,74 @@ public class ServerLayoutTests
         var layout = ServerLayout.Roles.SelectMany(r => r.Aliases.Append(ServerLayout.Slug(r.Name)));
         Assert.Empty(ServerLayout.ObsoleteRoles.Intersect(layout));
     }
+}
+
+public class ReleaseNotesTests
+{
+    #region Tests
+
+    [Fact]
+    public void Parse_ReadsVersionHeadlineIntroAndSections()
+    {
+        var draft = ReleaseNotes.Parse(
+            "1.4.0 - Building is back!\nA big one.\n\nNew\n- Auto farming\n• Island view\nImproved:\n* Faster queue\n## Fixed\n- Login works",
+            out var problem);
+
+        Assert.Null(problem);
+        Assert.NotNull(draft);
+        Assert.Equal("1.4.0", draft.Version);
+        Assert.Equal("Building is back!", draft.Headline);
+        Assert.Equal("A big one.", draft.Intro);
+        Assert.Equal(["✨ New features", "⚡ Improvements", "🪲 Bug fixes"], draft.Sections.Select(s => s.Title));
+        Assert.Equal("- Auto farming\n- Island view", draft.Sections[0].Body.Replace("\r", string.Empty));
+        Assert.Equal("- Faster queue", draft.Sections[1].Body.Trim());
+    }
+
+    [Theory]
+    [InlineData("v2.0", "2.0", null)]
+    [InlineData("GrepoBot 1.2.3.4: Hotfix", "1.2.3.4", "Hotfix")]
+    [InlineData("# **1.5.1** — Small fixes", "1.5.1", "Small fixes")]
+    public void Parse_AcceptsVersionLineStyles(string firstLine, string version, string? headline)
+    {
+        var draft = ReleaseNotes.Parse(firstLine + "\nFixed\n- x", out _);
+
+        Assert.NotNull(draft);
+        Assert.Equal(version, draft.Version);
+        Assert.Equal(headline, draft.Headline);
+    }
+
+    [Theory]
+    [InlineData("Hey everyone, new update!")]
+    [InlineData("")]
+    public void Parse_WithoutVersion_ExplainsTheProblem(string text)
+    {
+        Assert.Null(ReleaseNotes.Parse(text, out var problem));
+        Assert.Contains("first line", problem);
+    }
+
+    [Theory]
+    [InlineData("Bug fixes:", "🪲 Bug fixes")]
+    [InlineData("**What's new**", "✨ New features")]
+    [InlineData("### Known issues", "Known issues")]
+    [InlineData("Fixed the login", null)]
+    public void GetHeading_RecognizesHeadings(string line, string? expected)
+    {
+        Assert.Equal(expected, ReleaseNotes.GetHeading(line));
+    }
+
+    [Fact]
+    public void Template_ParsesItself()
+    {
+        Assert.NotNull(ReleaseNotes.Parse(ReleaseNotes.TEMPLATE, out _));
+    }
+
+    [Fact]
+    public void ReleaseBanner_Renders()
+    {
+        var png = GrepoBot.Discord.Services.WelcomeCard.RenderRelease("1.4.0", "Building is back!", DateTimeOffset.UtcNow);
+
+        Assert.True(png.Length > 1000);
+    }
+
+    #endregion
 }

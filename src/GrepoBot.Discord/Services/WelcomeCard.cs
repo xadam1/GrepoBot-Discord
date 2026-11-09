@@ -70,6 +70,46 @@ public static class WelcomeCard
         return data.ToArray();
     }
 
+    /// <summary>
+    /// Renders the release banner as PNG: the robot in the glowing ring, "NEW UPDATE", "GrepoBot 1.4.0" with the
+    /// version in cyan, the headline and the date, on the same background as the welcome card.
+    /// </summary>
+    public static byte[] RenderRelease(string version, string? headline, DateTimeOffset date)
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(WIDTH, HEIGHT, SKColorType.Rgba8888, SKAlphaType.Premul));
+        var canvas = surface.Canvas;
+
+        DrawBackground(canvas);
+        var avatarPath = Path.Combine(AppContext.BaseDirectory, "Assets", "avatar.png");
+        DrawAvatar(canvas, File.Exists(avatarPath) ? File.ReadAllBytes(avatarPath) : null);
+
+        using var heading = LoadTypeface("SpaceGrotesk-Bold.ttf", SKFontStyle.Bold);
+        using var bold = LoadTypeface("Inter-Bold.ttf", SKFontStyle.Bold);
+        using var semiBold = LoadTypeface("Inter-SemiBold.ttf", SKFontStyle.Bold);
+        using var medium = LoadTypeface("Inter-Medium.ttf", SKFontStyle.Normal);
+
+        var y = 125f;
+        DrawText(canvas, "NEW UPDATE", TEXT_X, y, bold, 28, _accent, TEXT_MAX_WIDTH, letterSpacing: 4);
+
+        // "GrepoBot" in white and the version in cyan, as big as both fit.
+        var name = "GrepoBot ";
+        var size = FitSize(name + version, heading, 86, 44, TEXT_MAX_WIDTH);
+        y += 18 + size;
+        DrawText(canvas, name, TEXT_X, y, heading, size, SKColors.White, TEXT_MAX_WIDTH, shadow: true);
+        var nameWidth = MeasureRuns(name, heading, size);
+        DrawText(canvas, version, TEXT_X + nameWidth, y, heading, size, _accent, TEXT_MAX_WIDTH - nameWidth, shadow: true);
+
+        y += 62;
+        DrawText(canvas, string.IsNullOrWhiteSpace(headline) ? "Fresh features and fixes are here!" : headline.Trim(), TEXT_X, y, medium, 31, _soft, TEXT_MAX_WIDTH);
+
+        y += 64;
+        DrawText(canvas, date.ToLocalTime().ToString("MMMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture), TEXT_X, y, semiBold, 26, _accent.WithAlpha(0xD0), TEXT_MAX_WIDTH, letterSpacing: 1);
+
+        using var image = surface.Snapshot();
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
     #endregion
 
     #region Private Methods

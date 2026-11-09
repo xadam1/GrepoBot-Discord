@@ -120,6 +120,53 @@ public sealed class RepostService
     }
 
     /// <summary>
+    /// The release card for the draft and its files (the version banner first, then the draft's attachments).
+    /// Throws <see cref="RepostException"/> when the draft has no version. Dispose the files.
+    /// </summary>
+    public async Task<(MessageComponent Card, List<FileAttachment> Files)> BuildReleaseAsync(IUserMessage source, IGuild guild, string? mention, DateTimeOffset date)
+    {
+        var draft = ReleaseNotes.Parse(source.Content, out var problem)
+            ?? throw new RepostException(problem + "\nExample:\n```\n" + ReleaseNotes.TEMPLATE + "\n```");
+
+        var files = await DownloadAttachmentsAsync(source, guild);
+        files.Insert(0, new FileAttachment(new MemoryStream(WelcomeCard.RenderRelease(draft.Version, draft.Headline, date)), ReleaseCard.BANNER_FILE_NAME));
+        var names = files.Skip(1).Select(f => (f.FileName, !f.IsSpoiler && RepostLayout.IsImage(f.FileName))).ToList();
+        return (ReleaseCard.Build(guild, draft, names, mention), files);
+    }
+
+    /// <summary>Posts the draft as a release card and remembers it, so "Update GrepoBot post" can update it.</summary>
+    public async Task<IUserMessage> PostReleaseAsync(IUserMessage source, ITextChannel target, IRole? pingRole, bool pingEveryone)
+    {
+        var postedAt = DateTimeOffset.UtcNow;
+        var (card, files) = await BuildReleaseAsync(source, target.Guild, Mention(pingRole?.Id, pingEveryone), postedAt);
+        IUserMessage posted;
+        try
+        {
+            posted = await target.SendFilesAsync(files, components: card, allowedMentions: _postMentions, flags: MessageFlags.ComponentsV2);
+        }
+        finally
+        {
+            DisposeAll(files);
+        }
+
+        await PublishIfAnnouncementAsync(target, [posted]);
+        _store.Update(state => state.Posts.Add(new PostRecord
+        {
+            SourceChannelId = source.Channel.Id,
+            SourceMessageId = source.Id,
+            TargetChannelId = target.Id,
+            MessageIds = [posted.Id],
+            PingRoleId = pingRole?.Id,
+            PingEveryone = pingEveryone,
+            IsRelease = true,
+            PostedAt = postedAt,
+        }));
+
+        _logger.LogInformation("Posted release {Source} to #{Channel}.", source.Id, target.Name);
+        return posted;
+    }
+
+    /// <summary>
     /// Re-applies the draft's current text and attachments to every copy posted from it.
     /// Returns a line per copy describing the result.
     /// </summary>
@@ -157,6 +204,11 @@ public sealed class RepostService
 
     private async Task<string> UpdateCopyAsync(IUserMessage source, ITextChannel channel, PostRecord record)
     {
+        if (record.IsRelease)
+        {
+            return await UpdateReleaseAsync(source, channel, record);
+        }
+
         var parts = RepostLayout.Build(source.Content, record.PingRoleId, record.PingEveryone, record.Color);
         if (parts.Count != record.MessageIds.Count)
         {
@@ -196,6 +248,37 @@ public sealed class RepostService
 
         var link = $"https://discord.com/channels/{channel.GuildId}/{channel.Id}/{record.MessageIds[0]}";
         return $"✅ Updated {link}";
+    }
+
+    private async Task<string> UpdateReleaseAsync(IUserMessage source, ITextChannel channel, PostRecord record)
+    {
+        if (await channel.GetMessageAsync(record.MessageIds[0]) is not IUserMessage copy)
+        {
+            return $"⚠️ {channel.Mention}: the posted release was deleted.";
+        }
+
+        var (card, files) = await BuildReleaseAsync(source, channel.Guild, Mention(record.PingRoleId, record.PingEveryone), record.PostedAt);
+        try
+        {
+            await copy.ModifyAsync(properties =>
+            {
+                properties.Components = card;
+                properties.Flags = MessageFlags.ComponentsV2;
+                properties.AllowedMentions = _postMentions;
+                properties.Attachments = files;
+            });
+        }
+        finally
+        {
+            DisposeAll(files);
+        }
+
+        return $"✅ Updated {copy.GetJumpUrl()}";
+    }
+
+    private static string? Mention(ulong? roleId, bool everyone)
+    {
+        return everyone ? "@everyone" : roleId is { } id ? $"<@&{id}>" : null;
     }
 
     /// <summary>
@@ -332,6 +415,7 @@ public sealed class RepostService
             PingRoleId = record.PingRoleId,
             PingEveryone = record.PingEveryone,
             Color = record.Color,
+            IsRelease = record.IsRelease,
             PostedAt = record.PostedAt,
         };
     }

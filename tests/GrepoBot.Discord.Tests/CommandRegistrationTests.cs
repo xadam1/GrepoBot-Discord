@@ -27,6 +27,7 @@ public class CommandRegistrationTests
 
         Assert.NotEmpty(modules);
         Assert.Contains(interactions.ContextCommands, c => c.Name == "Post as GrepoBot");
+        Assert.Contains(interactions.ContextCommands, c => c.Name == "Post as release");
         Assert.Contains(interactions.ContextCommands, c => c.Name == "Update GrepoBot post");
         Assert.Contains(interactions.ContextCommands, c => c.Name == "Purge from here");
 
@@ -53,6 +54,8 @@ public class CommandRegistrationTests
         Assert.Contains("rules-accept", components);
         Assert.Contains("role-toggle:*", components);
         Assert.Contains("post-send:*:*:*:*:*", components);
+        Assert.Contains("release-target:*:*", components);
+        Assert.Contains("release-send:*:*:*:*", components);
         Assert.Contains("post-color:*:*:*", components);
         Assert.Contains("purge-all-keep:*", components);
         Assert.Contains("ticket-open", components);

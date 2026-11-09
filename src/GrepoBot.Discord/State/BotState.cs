@@ -293,6 +293,9 @@ public sealed class PostRecord
     /// <summary>Color of the embed line, null for a plain message.</summary>
     public uint? Color { get; set; }
 
+    /// <summary>Posted with "Post as release": a release card instead of a copy.</summary>
+    public bool IsRelease { get; set; }
+
     public DateTimeOffset PostedAt { get; set; }
 
     #endregion
