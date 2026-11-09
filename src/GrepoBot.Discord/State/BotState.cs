@@ -13,11 +13,23 @@ public sealed class BotState
 
     public AutoReplySettings AutoReply { get; set; } = new();
 
+    public TicketSettings Tickets { get; set; } = new();
+
+    public ForumSettings Forum { get; set; } = new();
+
+    public AppStatusSettings Status { get; set; } = new();
+
+    /// <summary>The server's permanent invite the bot created (shown in the links card and on grepobot.net).</summary>
+    public string? InviteUrl { get; set; }
+
     /// <summary>Channel for the moderation log (deleted/edited messages, joins, leaves, bans). Null disables it.</summary>
     public ulong? LogChannelId { get; set; }
 
     /// <summary>Role pinged by "Post & ping" when reposting an update.</summary>
     public ulong? UpdatesRoleId { get; set; }
+
+    /// <summary>Color last picked in "Post as GrepoBot", preselected next time.</summary>
+    public string PostColor { get; set; } = GrepoBot.Discord.Logic.RepostLayout.DefaultColor;
 
     /// <summary>Publish reposts in announcement channels to following servers automatically.</summary>
     public bool AutoPublish { get; set; } = true;
@@ -34,8 +46,8 @@ public sealed class WelcomeSettings
 
     public const string DEFAULT_MESSAGE =
         "Hey {user}, welcome to **{server}**! 👋\n\n" +
-        "Please read and accept the rules in {rules} to unlock the rest of the server.\n" +
-        "You are our member **#{membercount}**.";
+        "Please have a look at {rules}. Questions about GrepoBot? Ask in the chat, " +
+        "and if something does not work for you, open a ticket. Have fun! 🎉";
 
     public ulong? ChannelId { get; set; }
 
@@ -54,8 +66,8 @@ public sealed class RulesSettings
         "**1. Be respectful.** No insults, harassment, hate speech or discrimination.\n" +
         "**2. No spam.** No flooding, mass mentions or unsolicited advertising (including DMs).\n" +
         "**3. Keep it on topic.** Use the right channel for your question.\n" +
-        "**4. No piracy or account sharing.** Do not share cracked versions of GrepoBot or other people's accounts.\n" +
-        "**5. Support goes through tickets.** For problems with your licence or payments open a ticket.\n" +
+        "**4. No piracy or account sharing.** Do not share cracked copies of GrepoBot or other people's accounts.\n" +
+        "**5. Support goes through tickets.** If GrepoBot does not work for you, open a ticket.\n" +
         "**6. Follow Discord's Terms of Service** and Community Guidelines.\n\n" +
         "Moderators may remove content or members that break these rules.\n\n" +
         "Click the button below to confirm that you have read and accept the rules.";
@@ -91,6 +103,139 @@ public sealed class AutoReplySettings
     public string Footer { get; set; } = DEFAULT_FOOTER;
 
     #endregion
+}
+
+public sealed class TicketSettings
+{
+    #region Properties
+
+    public const string DEFAULT_MESSAGE =
+        "Thanks for reaching out, {user}! 👋 A team member will be with you soon.\n\n" +
+        "📸 **Screenshots are very welcome**, they help us understand the problem much faster. " +
+        "Paste them right here:\n" +
+        "> **Windows:** `Win` + `Shift` + `S`, select the area, then `Ctrl` + `V` here\n" +
+        "> **macOS:** `Cmd` + `Ctrl` + `Shift` + `4`, select the area, then `Cmd` + `V` here\n" +
+        "You can also drag and drop images or short videos into this channel.";
+
+    /// <summary>Category the ticket channels are created in. Null means tickets are not set up.</summary>
+    public ulong? CategoryId { get; set; }
+
+    /// <summary>Roles that see every ticket and can claim, close and delete them.</summary>
+    public List<ulong> StaffRoleIds { get; set; } = [];
+
+    /// <summary>Channel where opened, closed and deleted tickets are logged. Null disables it.</summary>
+    public ulong? LogChannelId { get; set; }
+
+    /// <summary>Mention the staff roles when a ticket is opened.</summary>
+    public bool PingStaff { get; set; } = true;
+
+    /// <summary>How many tickets one member may have open at the same time.</summary>
+    public int MaxOpenPerUser { get; set; } = 1;
+
+    /// <summary>Text posted in a new ticket. Placeholders: {user} {topic} {server}.</summary>
+    public string Message { get; set; } = DEFAULT_MESSAGE;
+
+    /// <summary>Texts of the ticket panel, prefilled in <c>/tickets panel</c>.</summary>
+    public string PanelTitle { get; set; } = "🎫 Support";
+
+    public string PanelDescription { get; set; } = GrepoBot.Discord.Modules.TicketPanelModal.DEFAULT_TEXT;
+
+    /// <summary>Channel of the ticket panel, linked in the bot's DM auto-reply.</summary>
+    public ulong? PanelChannelId { get; set; }
+
+    /// <summary>Number of the last opened ticket.</summary>
+    public int Counter { get; set; }
+
+    /// <summary>Ticket channels that still exist (open or closed). Removed when the channel is deleted.</summary>
+    public List<TicketRecord> Tickets { get; set; } = [];
+
+    #endregion
+}
+
+public sealed class TicketRecord
+{
+    #region Properties
+
+    public ulong ChannelId { get; set; }
+
+    public int Number { get; set; }
+
+    public ulong OwnerId { get; set; }
+
+    public string OwnerName { get; set; } = string.Empty;
+
+    public string Topic { get; set; } = string.Empty;
+
+    public string Subject { get; set; } = string.Empty;
+
+    public DateTimeOffset OpenedAt { get; set; }
+
+    /// <summary>The ticket's first message with the Close and Claim buttons.</summary>
+    public ulong? ControlMessageId { get; set; }
+
+    public ulong? ClaimedById { get; set; }
+
+    /// <summary>Members added with <c>/ticket add</c>, they lose access on close and get it back on reopen.</summary>
+    public List<ulong> AddedUserIds { get; set; } = [];
+
+    public bool IsClosed { get; set; }
+
+    public DateTimeOffset? ClosedAt { get; set; }
+
+    public ulong? ClosedById { get; set; }
+
+    public string? CloseReason { get; set; }
+
+    #endregion
+
+    #region Public Methods
+
+    public TicketRecord Clone()
+    {
+        var copy = (TicketRecord)MemberwiseClone();
+        copy.AddedUserIds = AddedUserIds.ToList();
+        return copy;
+    }
+
+    #endregion
+}
+
+public sealed class ForumSettings
+{
+    #region Properties
+
+    /// <summary>The feedback forum (features, ideas, bugs). Null until <c>/forum setup</c>.</summary>
+    public ulong? ChannelId { get; set; }
+
+    /// <summary>Posts closed as Declined or Duplicate are deleted this many days after closing. 0 keeps them.</summary>
+    public int DeleteClosedAfterDays { get; set; } = 14;
+
+    /// <summary>Posts waiting for deletion.</summary>
+    public List<ClosedForumPost> ClosedPosts { get; set; } = [];
+
+    #endregion
+}
+
+public sealed class ClosedForumPost
+{
+    #region Properties
+
+    public ulong ThreadId { get; set; }
+
+    public ForumStatus Status { get; set; }
+
+    public DateTimeOffset DeleteAt { get; set; }
+
+    #endregion
+}
+
+/// <summary>Status tags of the feedback forum, only the team can set them.</summary>
+public enum ForumStatus
+{
+    Planned,
+    Done,
+    Declined,
+    Duplicate,
 }
 
 public enum MatchMode
@@ -142,7 +287,31 @@ public sealed class PostRecord
 
     public ulong? PingRoleId { get; set; }
 
+    /// <summary>The copy starts with @everyone.</summary>
+    public bool PingEveryone { get; set; }
+
+    /// <summary>Color of the embed line, null for a plain message.</summary>
+    public uint? Color { get; set; }
+
     public DateTimeOffset PostedAt { get; set; }
+
+    #endregion
+}
+
+public sealed class AppStatusSettings
+{
+    #region Properties
+
+    public ulong? ChannelId { get; set; }
+
+    public ulong? MessageId { get; set; }
+
+    public GrepoBot.Discord.Logic.AppState State { get; set; } = GrepoBot.Discord.Logic.AppState.Working;
+
+    /// <summary>Extra text from the team, null shows the state's default text.</summary>
+    public string? Note { get; set; }
+
+    public DateTimeOffset? UpdatedAt { get; set; }
 
     #endregion
 }

@@ -2,14 +2,15 @@ using Discord;
 using Discord.Interactions;
 using Discord.Net;
 using Discord.WebSocket;
+using GrepoBot.Discord.Logic;
 using GrepoBot.Discord.Services;
 using GrepoBot.Discord.State;
 
 namespace GrepoBot.Discord.Modules;
 
 /// <summary>
-/// Right click a message → Apps → "Post as GrepoBot": pick a channel and the bot posts a copy of the
-/// message (text, attachments, emojis, server stickers). "Update GrepoBot post" re-applies later
+/// Right click a message → Apps → "Post as GrepoBot": pick a channel and a color and the bot posts a copy of
+/// the message (text, attachments, emojis, server stickers) in an embed with that colored line, or as a plain message. "Update GrepoBot post" re-applies later
 /// edits of the draft to the posted copies.
 /// </summary>
 [CommandContextType(InteractionContextType.Guild)]
@@ -22,6 +23,10 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
     private const string TARGET_ID = "post-target";
     private const string SEND_ID = "post-send";
     private const string CANCEL_ID = "post-cancel";
+    private const string COLOR_ID = "post-color";
+    private const string PING_NONE = "0";
+    private const string PING_ROLE = "1";
+    private const string PING_EVERYONE = "e";
 
     private readonly RepostService _repost;
     private readonly StateStore _store;
@@ -80,49 +85,20 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
     [ComponentInteraction(TARGET_ID + ":*:*")]
     public async Task OnTargetSelectedAsync(string sourceChannelId, string sourceMessageId, string[] selected)
     {
-        var component = (SocketMessageComponent)Context.Interaction;
-        var target = Context.Guild.GetTextChannel(ulong.Parse(selected[0]));
-        if (target is null)
-        {
-            await component.UpdateAsync(p => p.Content = "❌ That channel no longer exists.");
-            return;
-        }
-
-        var sourceChannel = ulong.Parse(sourceChannelId);
-        var sourceMessage = ulong.Parse(sourceMessageId);
-        var missing = GetMissingPermissions(target);
-        var updatesRole = GetUpdatesRole();
-
-        var content = $"📮 Post the message to {target.Mention}?";
-        if (target is INewsChannel && _store.Read(s => s.AutoPublish))
-        {
-            content += "\n📣 It is an announcement channel, the post will be published to following servers.";
-        }
-
-        if (missing.Count > 0)
-        {
-            content += $"\n⚠️ I am missing these permissions in {target.Mention}: **{string.Join(", ", missing)}**.";
-        }
-
-        var buttons = BuildPicker(sourceChannel, sourceMessage, target.Id)
-            .WithButton("Post", $"{SEND_ID}:{sourceChannel}:{sourceMessage}:{target.Id}:0", ButtonStyle.Primary, new Emoji("📮"), row: 1);
-
-        if (updatesRole is not null)
-        {
-            buttons.WithButton($"Post & ping @{updatesRole.Name}", $"{SEND_ID}:{sourceChannel}:{sourceMessage}:{target.Id}:1", ButtonStyle.Success, new Emoji("🔔"), row: 1);
-        }
-
-        buttons.WithButton("Cancel", CANCEL_ID, ButtonStyle.Secondary, row: 1);
-
-        await component.UpdateAsync(p =>
-        {
-            p.Content = content;
-            p.Components = buttons.Build();
-        });
+        var color = _store.Read(state => state.PostColor);
+        await ShowConfirmAsync(ulong.Parse(sourceChannelId), ulong.Parse(sourceMessageId), ulong.Parse(selected[0]), color);
     }
 
-    [ComponentInteraction(SEND_ID + ":*:*:*:*")]
-    public async Task OnSendAsync(string sourceChannelId, string sourceMessageId, string targetChannelId, string ping)
+    [ComponentInteraction(COLOR_ID + ":*:*:*")]
+    public async Task OnColorSelectedAsync(string sourceChannelId, string sourceMessageId, string targetChannelId, string[] selected)
+    {
+        var color = RepostLayout.FindColor(selected.FirstOrDefault()).Value;
+        _store.Update(state => state.PostColor = color);
+        await ShowConfirmAsync(ulong.Parse(sourceChannelId), ulong.Parse(sourceMessageId), ulong.Parse(targetChannelId), color);
+    }
+
+    [ComponentInteraction(SEND_ID + ":*:*:*:*:*")]
+    public async Task OnSendAsync(string sourceChannelId, string sourceMessageId, string targetChannelId, string ping, string color)
     {
         var component = (SocketMessageComponent)Context.Interaction;
         await component.UpdateAsync(p =>
@@ -131,7 +107,7 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
             p.Components = new ComponentBuilder().Build();
         });
 
-        var result = await SendAsync(ulong.Parse(sourceChannelId), ulong.Parse(sourceMessageId), ulong.Parse(targetChannelId), ping == "1");
+        var result = await SendAsync(ulong.Parse(sourceChannelId), ulong.Parse(sourceMessageId), ulong.Parse(targetChannelId), ping, RepostLayout.FindColor(color));
         await ModifyOriginalResponseAsync(p => p.Content = result);
     }
 
@@ -150,7 +126,64 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
 
     #region Private Methods
 
-    private async Task<string> SendAsync(ulong sourceChannelId, ulong sourceMessageId, ulong targetChannelId, bool ping)
+    /// <summary>Channel picker, color picker and the post buttons for the chosen channel and color.</summary>
+    private async Task ShowConfirmAsync(ulong sourceChannel, ulong sourceMessage, ulong targetId, string colorValue)
+    {
+        var component = (SocketMessageComponent)Context.Interaction;
+        var target = Context.Guild.GetTextChannel(targetId);
+        if (target is null)
+        {
+            await component.UpdateAsync(p => p.Content = "❌ That channel no longer exists.");
+            return;
+        }
+
+        var color = RepostLayout.FindColor(colorValue);
+        var missing = GetMissingPermissions(target);
+        var updatesRole = GetUpdatesRole();
+
+        var content = $"📮 Post the message to {target.Mention}?\n🎨 {color.Emoji} {color.Label}";
+        if (target is INewsChannel && _store.Read(s => s.AutoPublish))
+        {
+            content += "\n📣 It is an announcement channel, the post will be published to following servers.";
+        }
+
+        if (missing.Count > 0)
+        {
+            content += $"\n⚠️ I am missing these permissions in {target.Mention}: **{string.Join(", ", missing)}**.";
+        }
+
+        var colors = new SelectMenuBuilder()
+            .WithCustomId($"{COLOR_ID}:{sourceChannel}:{sourceMessage}:{target.Id}")
+            .WithPlaceholder("Color of the line on the left")
+            .WithMinValues(1)
+            .WithMaxValues(1);
+
+        foreach (var option in RepostLayout.Colors)
+        {
+            colors.AddOption(option.Label, option.Value, emote: new Emoji(option.Emoji), isDefault: option.Value == color.Value);
+        }
+
+        var sendId = $"{SEND_ID}:{sourceChannel}:{sourceMessage}:{target.Id}";
+        var buttons = BuildPicker(sourceChannel, sourceMessage, target.Id)
+            .WithSelectMenu(colors, row: 1)
+            .WithButton("Post & ping @everyone", $"{sendId}:{PING_EVERYONE}:{color.Value}", ButtonStyle.Success, new Emoji("📢"), row: 2)
+            .WithButton("Post", $"{sendId}:{PING_NONE}:{color.Value}", ButtonStyle.Primary, new Emoji("📮"), row: 2);
+
+        if (updatesRole is not null)
+        {
+            buttons.WithButton($"Post & ping @{updatesRole.Name}", $"{sendId}:{PING_ROLE}:{color.Value}", ButtonStyle.Secondary, new Emoji("🔔"), row: 2);
+        }
+
+        buttons.WithButton("Cancel", CANCEL_ID, ButtonStyle.Secondary, row: 2);
+
+        await component.UpdateAsync(p =>
+        {
+            p.Content = content;
+            p.Components = buttons.Build();
+        });
+    }
+
+    private async Task<string> SendAsync(ulong sourceChannelId, ulong sourceMessageId, ulong targetChannelId, string ping, RepostColor color)
     {
         if (Context.Client.GetChannel(sourceChannelId) is not IMessageChannel sourceChannel
             || await sourceChannel.GetMessageAsync(sourceMessageId) is not IUserMessage source)
@@ -163,10 +196,10 @@ public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
             return "❌ The target channel no longer exists.";
         }
 
-        var pingRole = ping ? GetUpdatesRole() : null;
+        var pingRole = ping == PING_ROLE ? GetUpdatesRole() : null;
         try
         {
-            var posted = await _repost.PostAsync(source, target, pingRole);
+            var posted = await _repost.PostAsync(source, target, pingRole, pingEveryone: ping == PING_EVERYONE, color: color.Rgb);
             return $"✅ Posted to {target.Mention}: {posted.GetJumpUrl()}\n" +
                 "-# Edited the draft? Right click it → Apps → **Update GrepoBot post**.";
         }

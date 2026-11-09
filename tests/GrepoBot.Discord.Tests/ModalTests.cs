@@ -46,6 +46,23 @@ public class ModalTests
         Assert.Equal("Welcome message", modal.Title);
     }
 
+    [Fact]
+    public async Task TicketModals_Build()
+    {
+        Assert.Equal("Open a ticket", (await BuildAsync<TicketOpenModal>("ticket-create", _ => { })).Title);
+        Assert.Equal("Close the ticket?", (await BuildAsync<TicketCloseModal>("ticket-close-save", _ => { })).Title);
+        var panel = await BuildAsync<TicketPanelModal>("tickets-panel-save:1", builder =>
+        {
+            builder.UpdateTextInput(TicketPanelModal.TITLE_ID, input => input.Value = TicketPanelModal.DEFAULT_TITLE);
+            builder.UpdateTextInput(TicketPanelModal.TEXT_ID, input => input.Value = TicketPanelModal.DEFAULT_TEXT);
+        });
+        Assert.Equal("Ticket panel", panel.Title);
+
+        var message = await BuildAsync<TicketMessageModal>("tickets-message-save", builder =>
+            builder.UpdateTextInput(TicketMessageModal.MESSAGE_ID, input => input.Value = State.TicketSettings.DEFAULT_MESSAGE));
+        Assert.Equal("Ticket message", message.Title);
+    }
+
     #endregion
 
     #region Helpers

@@ -52,7 +52,10 @@ public sealed class AutoReplyService
         var settings = _store.Read(state => new
         {
             Rules = state.AutoReply.Rules.Where(r => r.Enabled).ToList(),
-            Ignored = state.AutoReply.IgnoredChannelIds.ToHashSet(),
+            // Ticket channels are always left to the team.
+            Ignored = state.AutoReply.IgnoredChannelIds
+                .Concat(state.Tickets.CategoryId is { } ticketCategory ? [ticketCategory] : [])
+                .ToHashSet(),
             state.AutoReply.IgnoreStaff,
             state.AutoReply.Footer,
         });

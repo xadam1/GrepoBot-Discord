@@ -93,7 +93,9 @@ public sealed class StateStore
             }
 
             var json = File.ReadAllText(_filePath);
-            return JsonSerializer.Deserialize<BotState>(json, _jsonOptions) ?? new BotState();
+            var state = JsonSerializer.Deserialize<BotState>(json, _jsonOptions) ?? new BotState();
+            StateMigrations.Apply(state);
+            return state;
         }
         catch (Exception ex)
         {

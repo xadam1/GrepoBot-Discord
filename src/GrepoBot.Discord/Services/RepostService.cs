@@ -61,30 +61,40 @@ public sealed class RepostService
         return null;
     }
 
-    /// <summary>Posts the copy and remembers it for later updates. Returns the first posted message.</summary>
-    public async Task<IUserMessage> PostAsync(IUserMessage source, ITextChannel target, IRole? pingRole)
+    /// <summary>
+    /// Posts the copy and remembers it for later updates. <paramref name="pingEveryone"/> pings @everyone,
+    /// <paramref name="pingRole"/> the role. With <paramref name="color"/> the text sits in an embed with that
+    /// colored line on the left (the first image inside it), without it the copy is a plain message.
+    /// Discord draws text in embeds slightly smaller than plain messages, nothing can change that.
+    /// Returns the first posted message.
+    /// </summary>
+    public async Task<IUserMessage> PostAsync(IUserMessage source, ITextChannel target, IRole? pingRole, bool pingEveryone = false, uint? color = null)
     {
-        var parts = BuildTextParts(source.Content, pingRole?.Id);
+        var parts = RepostLayout.Build(source.Content, pingRole?.Id, pingEveryone, color);
         var files = await DownloadAttachmentsAsync(source, target.Guild);
         var stickers = FindServerStickers(source, target.Guild);
-        var embeds = GetRichEmbeds(source);
-        var flags = source.Flags?.HasFlag(MessageFlags.SuppressEmbeds) == true
+        var richEmbeds = GetRichEmbeds(source);
+
+        // "Suppress embeds" on the draft only hides link previews, but on the copy it would hide the colored embed too.
+        var flags = color is null && source.Flags?.HasFlag(MessageFlags.SuppressEmbeds) == true
             ? MessageFlags.SuppressEmbeds
             : MessageFlags.None;
 
         var posted = new List<IUserMessage>();
         try
         {
-            // Every part but the last is plain text, the last one carries files, stickers and embeds.
+            // Every part but the last is text only, the last one carries files, stickers and the draft's embeds.
             for (var i = 0; i < parts.Count - 1; i++)
             {
-                posted.Add(await target.SendMessageAsync(parts[i], allowedMentions: _postMentions, flags: flags));
+                var embeds = BuildEmbeds(parts[i], isLast: false, color, files, richEmbeds);
+                posted.Add(await target.SendMessageAsync(parts[i].Content, allowedMentions: _postMentions, embeds: embeds, flags: flags));
             }
 
-            var last = parts.Count > 0 ? parts[^1] : null;
+            var last = parts[^1];
+            var lastEmbeds = BuildEmbeds(last, isLast: true, color, files, richEmbeds);
             posted.Add(files.Count > 0
-                ? await target.SendFilesAsync(files, last, allowedMentions: _postMentions, stickers: stickers, embeds: embeds, flags: flags)
-                : await target.SendMessageAsync(last, allowedMentions: _postMentions, stickers: stickers, embeds: embeds, flags: flags));
+                ? await target.SendFilesAsync(files, last.Content, allowedMentions: _postMentions, stickers: stickers, embeds: lastEmbeds, flags: flags)
+                : await target.SendMessageAsync(last.Content, allowedMentions: _postMentions, stickers: stickers, embeds: lastEmbeds, flags: flags));
         }
         finally
         {
@@ -100,6 +110,8 @@ public sealed class RepostService
             TargetChannelId = target.Id,
             MessageIds = posted.Select(m => m.Id).ToList(),
             PingRoleId = pingRole?.Id,
+            PingEveryone = pingEveryone,
+            Color = color,
             PostedAt = DateTimeOffset.UtcNow,
         }));
 
@@ -145,19 +157,14 @@ public sealed class RepostService
 
     private async Task<string> UpdateCopyAsync(IUserMessage source, ITextChannel channel, PostRecord record)
     {
-        var parts = BuildTextParts(source.Content, record.PingRoleId);
-        if (parts.Count == 0)
-        {
-            parts.Add(string.Empty);
-        }
-
+        var parts = RepostLayout.Build(source.Content, record.PingRoleId, record.PingEveryone, record.Color);
         if (parts.Count != record.MessageIds.Count)
         {
             return $"⚠️ {channel.Mention}: the draft now needs {parts.Count} message(s) instead of {record.MessageIds.Count}. Delete the old post and post it again.";
         }
 
         var files = await DownloadAttachmentsAsync(source, channel.Guild);
-        var embeds = GetRichEmbeds(source);
+        var richEmbeds = GetRichEmbeds(source);
         try
         {
             for (var i = 0; i < parts.Count; i++)
@@ -167,16 +174,17 @@ public sealed class RepostService
                     return $"⚠️ {channel.Mention}: the posted message was deleted.";
                 }
 
-                var text = parts[i];
+                var part = parts[i];
                 var isLast = i == parts.Count - 1;
+                var embeds = BuildEmbeds(part, isLast, record.Color, files, richEmbeds);
                 await copy.ModifyAsync(properties =>
                 {
-                    properties.Content = text;
+                    properties.Content = part.Content ?? string.Empty;
                     properties.AllowedMentions = _postMentions;
+                    properties.Embeds = embeds;
                     if (isLast)
                     {
                         properties.Attachments = files;
-                        properties.Embeds = embeds;
                     }
                 });
             }
@@ -190,15 +198,52 @@ public sealed class RepostService
         return $"✅ Updated {link}";
     }
 
-    private static List<string> BuildTextParts(string content, ulong? pingRoleId)
+    /// <summary>
+    /// The embeds of one message of the copy: the colored embed with the text (the last one also shows the
+    /// first image), then on the last message the draft's own embeds. Discord allows 10 per message.
+    /// </summary>
+    private static Embed[] BuildEmbeds(RepostPart part, bool isLast, uint? color, IReadOnlyList<FileAttachment> files, Embed[] richEmbeds)
     {
-        var text = content ?? string.Empty;
-        if (pingRoleId is not null)
+        var embeds = new List<Embed>();
+        if (color is { } rgb)
         {
-            text = $"<@&{pingRoleId}>\n{text}".TrimEnd();
+            var imageIndex = isLast ? IndexOfImage(files) : -1;
+            if (part.EmbedText is not null || imageIndex >= 0)
+            {
+                var embed = new EmbedBuilder().WithColor(new Color(rgb));
+                if (part.EmbedText is { } text)
+                {
+                    embed.WithDescription(text);
+                }
+
+                if (imageIndex >= 0)
+                {
+                    embed.WithImageUrl("attachment://" + files[imageIndex].FileName);
+                }
+
+                embeds.Add(embed.Build());
+            }
         }
 
-        return MessageSplitter.Split(text);
+        if (isLast)
+        {
+            embeds.AddRange(richEmbeds);
+        }
+
+        return embeds.Take(10).ToArray();
+    }
+
+    private static int IndexOfImage(IReadOnlyList<FileAttachment> files)
+    {
+        for (var i = 0; i < files.Count; i++)
+        {
+            if (!files[i].IsSpoiler && RepostLayout.IsImage(files[i].FileName))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private async Task<List<FileAttachment>> DownloadAttachmentsAsync(IMessage source, IGuild guild)
@@ -219,7 +264,7 @@ public sealed class RepostService
                 var bytes = await _http.GetByteArrayAsync(attachment.Url);
                 files.Add(new FileAttachment(
                     new MemoryStream(bytes),
-                    attachment.Filename,
+                    RepostLayout.SafeFileName(attachment.Filename),
                     attachment.Description,
                     attachment.IsSpoiler()));
             }
@@ -285,6 +330,8 @@ public sealed class RepostService
             TargetChannelId = record.TargetChannelId,
             MessageIds = record.MessageIds.ToList(),
             PingRoleId = record.PingRoleId,
+            PingEveryone = record.PingEveryone,
+            Color = record.Color,
             PostedAt = record.PostedAt,
         };
     }

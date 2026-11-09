@@ -15,7 +15,7 @@ public sealed class DiscordOptions
     /// <summary>The community server the bot serves. Commands are registered to it so they appear instantly.</summary>
     public ulong GuildId { get; set; }
 
-    /// <summary>Custom status shown under the bot's name.</summary>
+    /// <summary>A fixed custom status under the bot's name. Empty rotates through <c>BotStatuses</c>.</summary>
     public string Status { get; set; } = string.Empty;
 
     #endregion

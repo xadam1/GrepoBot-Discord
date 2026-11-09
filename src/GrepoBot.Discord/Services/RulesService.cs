@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace GrepoBot.Discord.Services;
 
 /// <summary>
-/// Posts the rules with an "I accept" button and gives the member role to whoever accepts.
+/// Posts the rules as a card (optionally with an "I accept" button) and gives the member role to whoever accepts.
 /// </summary>
 public sealed class RulesService
 {
@@ -34,51 +34,36 @@ public sealed class RulesService
 
     /// <summary>
     /// Saves the rules and posts them to <paramref name="channel"/>, or edits the existing rules message there.
+    /// With <paramref name="memberRole"/> the message has an accept button giving that role; without it the rules
+    /// are only shown (Discord's own rules screening then handles accepting).
     /// </summary>
-    public async Task<IUserMessage> PublishAsync(ITextChannel channel, IRole memberRole, string title, string text)
+    public async Task<IUserMessage> PublishAsync(ITextChannel channel, IRole? memberRole, string title, string text)
     {
         var existing = _store.Read(state => new { state.Rules.ChannelId, state.Rules.MessageId });
 
         _store.Update(state =>
         {
             state.Rules.ChannelId = channel.Id;
-            state.Rules.MemberRoleId = memberRole.Id;
+            state.Rules.MemberRoleId = memberRole?.Id;
             state.Rules.Title = title;
             state.Rules.Text = text;
         });
 
-        var embed = BuildEmbed(title, text, withBanner: false);
-        var components = BuildComponents();
-
-        if (existing.ChannelId == channel.Id
-            && existing.MessageId is { } messageId
-            && await channel.GetMessageAsync(messageId) is IUserMessage message)
+        IUserMessage? existingMessage = null;
+        if (existing.ChannelId == channel.Id && existing.MessageId is { } messageId)
         {
-            var hasBanner = message.Attachments.Any(a => a.Filename == BotBranding.BANNER_FILE_NAME);
-            await message.ModifyAsync(properties =>
-            {
-                properties.Embed = BuildEmbed(title, text, hasBanner);
-                properties.Components = components;
-            });
-
-            _logger.LogInformation("Updated the rules message in #{Channel}.", channel.Name);
-            return message;
+            existingMessage = await channel.GetMessageAsync(messageId) as IUserMessage;
         }
 
-        IUserMessage posted;
-        if (BotBranding.HasBanner)
+        var card = BuildCard(channel.Guild, title, text, memberRole is not null);
+        var message = await MessageCards.UpsertAsync(channel, existingMessage, card, BotBranding.HasBanner ? MessageCards.One(BotBranding.OpenBanner) : null);
+        if (message.Id != existingMessage?.Id)
         {
-            using var banner = BotBranding.OpenBanner();
-            posted = await channel.SendFileAsync(banner, embed: BuildEmbed(title, text, withBanner: true), components: components);
-        }
-        else
-        {
-            posted = await channel.SendMessageAsync(embed: embed, components: components);
+            _store.Update(state => state.Rules.MessageId = message.Id);
         }
 
-        _store.Update(state => state.Rules.MessageId = posted.Id);
-        _logger.LogInformation("Posted the rules in #{Channel}.", channel.Name);
-        return posted;
+        _logger.LogInformation("Published the rules in #{Channel}.", channel.Name);
+        return message;
     }
 
     /// <summary>Gives the member role. Returns the text shown to the member.</summary>
@@ -111,27 +96,29 @@ public sealed class RulesService
 
     #region Private Methods
 
-    private static Embed BuildEmbed(string title, string text, bool withBanner)
+    /// <summary>The rules card: banner, title, rules and (with a member role) the accept button.</summary>
+    private static MessageComponent BuildCard(IGuild guild, string title, string text, bool withAcceptButton)
     {
-        var embed = new EmbedBuilder()
-            .WithColor(BotBranding.Accent)
-            .WithTitle(title)
-            .WithDescription(text)
-            .WithFooter("GrepoBot community");
-
-        if (withBanner)
+        var container = new ContainerBuilder().WithAccentColor(BotBranding.Accent);
+        if (BotBranding.HasBanner)
         {
-            embed.WithImageUrl(BotBranding.BannerAttachmentUrl);
+            container.WithMediaGallery(MessageCards.Banner());
         }
 
-        return embed.Build();
-    }
+        container
+            .WithTextDisplay("# " + title)
+            .WithSeparator(SeparatorSpacingSize.Small, true)
+            .WithTextDisplay(text)
+            .WithSeparator(SeparatorSpacingSize.Small, true)
+            .WithTextDisplay($"-# {guild.Name} · these rules apply everywhere on the server");
 
-    private static MessageComponent BuildComponents()
-    {
-        return new ComponentBuilder()
-            .WithButton("I have read and accept the rules", ACCEPT_BUTTON_ID, ButtonStyle.Success, new Emoji("✅"))
-            .Build();
+        if (withAcceptButton)
+        {
+            container.WithActionRow(new ActionRowBuilder()
+                .WithButton("I have read and accept the rules", ACCEPT_BUTTON_ID, ButtonStyle.Success, new Emoji("✅")));
+        }
+
+        return new ComponentBuilderV2().WithContainer(container).Build();
     }
 
     #endregion

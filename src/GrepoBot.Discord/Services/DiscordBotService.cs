@@ -3,6 +3,7 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using GrepoBot.Discord.Configuration;
+using GrepoBot.Discord.Logic;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -25,8 +26,12 @@ public sealed class DiscordBotService : IHostedService
     private readonly AutoReplyService _autoReply;
     private readonly WelcomeService _welcome;
     private readonly ModLogService _modLog;
+    private readonly TicketService _tickets;
+    private readonly ForumService _forum;
+    private readonly DirectMessageService _directMessages;
     private readonly ILogger<DiscordBotService> _logger;
     private bool _commandsRegistered;
+    private int _statusRotationStarted;
 
     #endregion
 
@@ -40,6 +45,9 @@ public sealed class DiscordBotService : IHostedService
         AutoReplyService autoReply,
         WelcomeService welcome,
         ModLogService modLog,
+        TicketService tickets,
+        ForumService forum,
+        DirectMessageService directMessages,
         ILogger<DiscordBotService> logger)
     {
         _client = client;
@@ -49,6 +57,9 @@ public sealed class DiscordBotService : IHostedService
         _autoReply = autoReply;
         _welcome = welcome;
         _modLog = modLog;
+        _tickets = tickets;
+        _forum = forum;
+        _directMessages = directMessages;
         _logger = logger;
     }
 
@@ -77,12 +88,15 @@ public sealed class DiscordBotService : IHostedService
         _interactions.InteractionExecuted += OnInteractionExecutedAsync;
 
         _client.MessageReceived += message => RunSafe(() => _autoReply.HandleMessageAsync(message), "auto-reply");
+        _client.MessageReceived += message => RunSafe(() => _directMessages.HandleMessageAsync(message), "direct message");
         _client.UserJoined += user => RunSafe(() => OnUserJoinedAsync(user), "member join");
         _client.UserLeft += (guild, user) => RunSafe(() => _modLog.OnUserLeftAsync(guild, user), "member leave");
         _client.UserBanned += (user, guild) => RunSafe(() => _modLog.OnUserBannedAsync(user, guild), "ban");
         _client.UserUnbanned += (user, guild) => RunSafe(() => _modLog.OnUserUnbannedAsync(user, guild), "unban");
         _client.MessageDeleted += (message, channel) => RunSafe(() => _modLog.OnMessageDeletedAsync(message, channel), "message delete");
         _client.MessageUpdated += (before, after, channel) => RunSafe(() => _modLog.OnMessageUpdatedAsync(before, after, channel), "message edit");
+        _client.ChannelDestroyed += channel => RunSafe(() => _tickets.OnChannelDestroyedAsync(channel), "channel delete");
+        _client.ThreadCreated += thread => RunSafe(() => _forum.OnThreadCreatedAsync(thread), "forum post");
 
         await _interactions.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
         await _client.LoginAsync(TokenType.Bot, _options.Token);
@@ -99,6 +113,25 @@ public sealed class DiscordBotService : IHostedService
 
     #region Private Methods
 
+    /// <summary>Cycles through <see cref="BotStatuses"/> for as long as the bot runs (the status survives reconnects).</summary>
+    private async Task RotateStatusAsync()
+    {
+        using var timer = new PeriodicTimer(BotStatuses.Interval);
+        var step = 0L;
+        do
+        {
+            try
+            {
+                await _client.SetCustomStatusAsync(BotStatuses.At(step++));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Setting the bot status failed.");
+            }
+        }
+        while (await timer.WaitForNextTickAsync());
+    }
+
     private async Task OnReadyAsync()
     {
         _logger.LogInformation("Connected as {User}.", _client.CurrentUser);
@@ -106,6 +139,10 @@ public sealed class DiscordBotService : IHostedService
         if (!string.IsNullOrWhiteSpace(_options.Status))
         {
             await _client.SetCustomStatusAsync(_options.Status);
+        }
+        else if (Interlocked.Exchange(ref _statusRotationStarted, 1) == 0)
+        {
+            _ = RotateStatusAsync();
         }
 
         // Ready fires again after every reconnect, the commands only need registering once.
@@ -127,6 +164,13 @@ public sealed class DiscordBotService : IHostedService
 
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
     {
+        // Another instance with the same token (e.g. a local test run for the test server) answers
+        // interactions of its own server, two answers to one click would fail.
+        if (interaction.GuildId is { } guildId && guildId != _options.GuildId)
+        {
+            return;
+        }
+
         try
         {
             var context = new SocketInteractionContext(_client, interaction);

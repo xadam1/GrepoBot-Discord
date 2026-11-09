@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -40,7 +39,6 @@ public sealed class PublicModule : InteractionModuleBase<SocketInteractionContex
     [SlashCommand("about", "What is GrepoBot and where to get it")]
     public async Task AboutAsync()
     {
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "?";
         var uptime = DateTime.Now - Process.GetCurrentProcess().StartTime;
 
         var embed = new EmbedBuilder()
@@ -50,7 +48,7 @@ public sealed class PublicModule : InteractionModuleBase<SocketInteractionContex
             .WithDescription(
                 "Automation tool and helper for **Grepolis**: farming, building, culture and more, " +
                 "with the game embedded right in the app.")
-            .WithFooter($"Discord bot v{version} · up {uptime.Days}d {uptime.Hours}h {uptime.Minutes}m")
+            .WithFooter($"Bot online for {uptime.Days}d {uptime.Hours}h {uptime.Minutes}m")
             .Build();
 
         var links = new ComponentBuilder()

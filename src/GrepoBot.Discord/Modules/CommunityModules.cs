@@ -40,29 +40,29 @@ public sealed class RulesModule : InteractionModuleBase<SocketInteractionContext
     [SlashCommand("post", "Post the rules to a channel (a form for the text opens)")]
     public async Task PostAsync(
         [Summary(description: "Channel for the rules"), ChannelTypes(ChannelType.Text, ChannelType.News)] ITextChannel channel,
-        [Summary(description: "Role given after accepting, e.g. Member")] IRole role)
+        [Summary(description: "Role given after accepting (leave empty when Discord's rules screening is on)")] IRole? role = null)
     {
-        var problem = RoleSafety.GetProblem(role, Context.Guild.CurrentUser.Hierarchy);
+        var problem = role is null ? null : RoleSafety.GetProblem(role, Context.Guild.CurrentUser.Hierarchy);
         if (problem is not null)
         {
             await RespondAsync($"❌ {problem}", ephemeral: true);
             return;
         }
 
-        await RespondWithRulesModalAsync(channel.Id, role.Id);
+        await RespondWithRulesModalAsync(channel.Id, role?.Id ?? 0);
     }
 
     [SlashCommand("edit", "Edit the posted rules")]
     public async Task EditAsync()
     {
         var rules = _store.Read(state => new { state.Rules.ChannelId, state.Rules.MemberRoleId });
-        if (rules.ChannelId is null || rules.MemberRoleId is null)
+        if (rules.ChannelId is null)
         {
             await RespondAsync("❌ The rules are not posted yet. Use `/rules post`.", ephemeral: true);
             return;
         }
 
-        await RespondWithRulesModalAsync(rules.ChannelId.Value, rules.MemberRoleId.Value);
+        await RespondWithRulesModalAsync(rules.ChannelId.Value, rules.MemberRoleId ?? 0);
     }
 
     [ModalInteraction(SAVE_ID + ":*:*", ignoreGroupNames: true)]
@@ -71,14 +71,20 @@ public sealed class RulesModule : InteractionModuleBase<SocketInteractionContext
         await DeferAsync(ephemeral: true);
 
         var channel = Context.Guild.GetTextChannel(ulong.Parse(channelId));
-        var role = Context.Guild.GetRole(ulong.Parse(roleId));
-        if (channel is null || role is null)
+        var role = roleId == "0" ? null : Context.Guild.GetRole(ulong.Parse(roleId));
+        if (channel is null || (roleId != "0" && role is null))
         {
             await FollowupAsync("❌ The channel or the role no longer exists.", ephemeral: true);
             return;
         }
 
         var message = await _rules.PublishAsync(channel, role, modal.RulesTitle.Trim(), modal.Text.Trim());
+        if (role is null)
+        {
+            await FollowupAsync($"✅ Rules are live: {message.GetJumpUrl()}", ephemeral: true);
+            return;
+        }
+
         await FollowupAsync(
             $"✅ Rules are live: {message.GetJumpUrl()}\n\n" +
             $"**Tip:** to lock the server until the rules are accepted, deny *View Channel* for @everyone on your categories, " +
@@ -120,7 +126,7 @@ public sealed class RulesModal : IModal
     public string RulesTitle { get; set; } = string.Empty;
 
     [InputLabel("Rules (markdown)")]
-    [ModalTextInput(TEXT_ID, TextInputStyle.Paragraph, "**1. Be respectful.** …", maxLength: 4000)]
+    [ModalTextInput(TEXT_ID, TextInputStyle.Paragraph, "**1. Be respectful.** …", maxLength: 3600)]
     public string Text { get; set; } = string.Empty;
 
     #endregion
@@ -308,6 +314,8 @@ public sealed class SetupModule : InteractionModuleBase<SocketInteractionContext
             RulesChannelId = state.Rules.ChannelId,
             state.Rules.MemberRoleId,
             AutoReplies = state.AutoReply.Rules.Count,
+            TicketCategoryId = state.Tickets.CategoryId,
+            OpenTickets = state.Tickets.Tickets.Count(t => !t.IsClosed),
             Posts = state.Posts.Count,
         });
 
@@ -320,6 +328,7 @@ public sealed class SetupModule : InteractionModuleBase<SocketInteractionContext
             .AddField("Updates role", s.UpdatesRoleId is null ? "not set" : $"<@&{s.UpdatesRoleId}>", inline: true)
             .AddField("Auto-publish", s.AutoPublish ? "on" : "off", inline: true)
             .AddField("Automatic answers", s.AutoReplies.ToString(), inline: true)
+            .AddField("Tickets", s.TicketCategoryId is null ? "not set up" : $"<#{s.TicketCategoryId}> · {s.OpenTickets} open", inline: true)
             .WithFooter($"{s.Posts} reposts remembered")
             .Build();
 
@@ -333,13 +342,13 @@ public sealed class SetupModule : InteractionModuleBase<SocketInteractionContext
         await RespondAsync(channel is null ? "⏸️ Moderation log is off." : $"✅ Moderation log goes to {channel.Mention}.", ephemeral: true);
     }
 
-    [SlashCommand("updates-role", "Role pinged by \"Post & ping\" for new versions (leave empty to remove)")]
+    [SlashCommand("updates-role", "Optional role for \"Post & ping @role\" (leave empty to remove)")]
     public async Task UpdatesRoleAsync(IRole? role = null)
     {
         _store.Update(state => state.UpdatesRoleId = role?.Id);
         var text = role is null
             ? "⏸️ No updates role."
-            : $"✅ {role.Mention} will be pinged by **Post & ping**. Make it self-assignable with `/roles panel`.";
+            : $"✅ **Post as GrepoBot** now also offers **Post & ping @{role.Name}**. Make it self-assignable with `/roles panel`.";
         await RespondAsync(text, ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 

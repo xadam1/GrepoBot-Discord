@@ -9,13 +9,15 @@ using Microsoft.Extensions.Options;
 namespace GrepoBot.Discord.Services;
 
 /// <summary>
-/// Greets new members in the welcome channel with the configured message and the GrepoBot banner.
+/// Greets new members in the welcome channel with the configured message and a personal welcome card
+/// (their avatar and name on the GrepoBot background, see <see cref="WelcomeCard"/>).
 /// </summary>
 public sealed class WelcomeService
 {
     #region Private Fields
 
     private readonly StateStore _store;
+    private readonly HttpClient _http;
     private readonly ulong _guildId;
     private readonly ILogger<WelcomeService> _logger;
 
@@ -23,9 +25,10 @@ public sealed class WelcomeService
 
     #region Constructor
 
-    public WelcomeService(StateStore store, IOptions<DiscordOptions> options, ILogger<WelcomeService> logger)
+    public WelcomeService(StateStore store, HttpClient http, IOptions<DiscordOptions> options, ILogger<WelcomeService> logger)
     {
         _store = store;
+        _http = http;
         _guildId = options.Value.GuildId;
         _logger = logger;
     }
@@ -59,27 +62,32 @@ public sealed class WelcomeService
             return false;
         }
 
-        var text = RenderMessage(settings.Message, user, settings.RulesChannelId);
-        var embed = new EmbedBuilder()
-            .WithColor(BotBranding.Accent)
-            .WithAuthor($"Welcome, {user.DisplayName}!", user.GetDisplayAvatarUrl())
-            .WithDescription(text)
-            .WithThumbnailUrl(user.GetDisplayAvatarUrl(size: 256))
-            .WithFooter(user.Guild.Name, user.Guild.IconUrl)
-            .WithCurrentTimestamp();
-
-        // Mention in the content so the new member gets a notification, embeds never ping.
+        // Without the bot's /rules, {rules} points to the server's own rules channel (Community servers).
+        var text = RenderMessage(settings.Message, user, settings.RulesChannelId ?? user.Guild.RulesChannel?.Id);
+        // Mentions inside a card ping too, the new member gets a notification.
         var mentions = new AllowedMentions { UserIds = [user.Id] };
-        if (BotBranding.HasBanner)
+        if (!text.Contains(user.Mention, StringComparison.Ordinal))
         {
-            using var banner = BotBranding.OpenBanner();
-            embed.WithImageUrl(BotBranding.BannerAttachmentUrl);
-            await channel.SendFileAsync(banner, user.Mention, embed: embed.Build(), allowedMentions: mentions);
+            text = $"👋 {user.Mention}\n{text}";
         }
-        else
+
+        var card = await RenderCardAsync(user);
+        Func<IReadOnlyList<FileAttachment>>? file = card is not null
+            ? MessageCards.One(() => new FileAttachment(new MemoryStream(card), WelcomeCard.FILE_NAME))
+            : BotBranding.HasBanner ? MessageCards.One(BotBranding.OpenBanner) : null;
+        var imageUrl = card is not null ? "attachment://" + WelcomeCard.FILE_NAME : BotBranding.BannerAttachmentUrl;
+
+        var container = new ContainerBuilder()
+            .WithAccentColor(BotBranding.Accent)
+            .WithTextDisplay(text);
+        if (file is not null)
         {
-            await channel.SendMessageAsync(user.Mention, embed: embed.Build(), allowedMentions: mentions);
+            container.WithMediaGallery(new MediaGalleryBuilder().AddItem(imageUrl, $"Welcome card of {user.DisplayName}", false));
         }
+
+        container.WithTextDisplay($"-# {user.Guild.Name} · member #{user.Guild.MemberCount:N0} · <t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:f>");
+        var components = new ComponentBuilderV2().WithContainer(container).Build();
+        await MessageCards.UpsertAsync(channel, null, components, file, mentions);
 
         _logger.LogInformation("Welcomed {User} in #{Channel}.", user.Username, channel.Name);
         return true;
@@ -88,6 +96,30 @@ public sealed class WelcomeService
     #endregion
 
     #region Private Methods
+
+    /// <summary>The personal card, or null when drawing it fails (the banner is used then).</summary>
+    private async Task<byte[]?> RenderCardAsync(SocketGuildUser user)
+    {
+        try
+        {
+            byte[]? avatar = null;
+            try
+            {
+                avatar = await _http.GetByteArrayAsync(user.GetDisplayAvatarUrl(ImageFormat.Png, 256));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not download the avatar of {User}.", user.Username);
+            }
+
+            return WelcomeCard.Render(avatar, user.DisplayName, user.Guild.Name, user.Guild.MemberCount, WelcomeQuips.Pick());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Drawing the welcome card for {User} failed, using the banner.", user.Username);
+            return null;
+        }
+    }
 
     private static string RenderMessage(string template, SocketGuildUser user, ulong? rulesChannelId)
     {

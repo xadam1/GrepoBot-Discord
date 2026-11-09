@@ -38,17 +38,38 @@ public class CommandRegistrationTests
         Assert.Contains("roles panel", slash);
         Assert.Contains("setup branding", slash);
         Assert.Contains("about", slash);
+        Assert.Contains("tickets setup", slash);
+        Assert.Contains("tickets panel", slash);
+        Assert.Contains("ticket add", slash);
+        Assert.Contains("ticket close", slash);
+        Assert.Contains("forum status", slash);
+        Assert.Contains("forum reopen", slash);
+        Assert.Contains("forum setup", slash);
+        Assert.Contains("server setup", slash);
+        Assert.Contains("status set", slash);
 
         // Component and modal handlers are found by the ids the bot puts on its buttons and forms.
         var components = interactions.ComponentCommands.Select(c => c.Name).ToList();
         Assert.Contains("rules-accept", components);
         Assert.Contains("role-toggle:*", components);
-        Assert.Contains("post-send:*:*:*:*", components);
+        Assert.Contains("post-send:*:*:*:*:*", components);
+        Assert.Contains("post-color:*:*:*", components);
         Assert.Contains("purge-all-keep:*", components);
+        Assert.Contains("ticket-open", components);
+        Assert.Contains("ticket-close", components);
+        Assert.Contains("ticket-claim", components);
+        Assert.Contains("ticket-reopen", components);
+        Assert.Contains("ticket-delete", components);
+        Assert.Contains("server-setup-apply", components);
+        Assert.Contains("server-setup-cancel", components);
         var modals = interactions.ModalCommands.Select(c => c.Name).ToList();
         Assert.Contains("autoreply-save:*:*:*:*", modals);
         Assert.Contains("rules-save:*:*", modals);
         Assert.Contains("welcome-save:*", modals);
+        Assert.Contains("ticket-create", modals);
+        Assert.Contains("ticket-close-save", modals);
+        Assert.Contains("tickets-panel-save:*", modals);
+        Assert.Contains("tickets-message-save", modals);
     }
 
     [Fact]
@@ -95,6 +116,11 @@ public class CommandRegistrationTests
         services.AddSingleton<AutoReplyService>();
         services.AddSingleton<WelcomeService>();
         services.AddSingleton<ModLogService>();
+        services.AddSingleton<TicketService>();
+        services.AddSingleton<ForumService>();
+        services.AddSingleton<AppStatusService>();
+        services.AddSingleton<ServerSetupService>();
+        services.AddSingleton<DirectMessageService>();
         return services.BuildServiceProvider();
     }
 

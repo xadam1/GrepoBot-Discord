@@ -28,7 +28,8 @@ builder.Services.AddSingleton(new DiscordSocketConfig
         | GatewayIntents.GuildMembers
         | GatewayIntents.GuildMessages
         | GatewayIntents.MessageContent
-        | GatewayIntents.GuildBans,
+        | GatewayIntents.GuildBans
+        | GatewayIntents.DirectMessages,
     MessageCacheSize = 500,
     AlwaysDownloadUsers = false,
     LogLevel = LogSeverity.Info,
@@ -51,6 +52,12 @@ builder.Services.AddSingleton<RulesService>();
 builder.Services.AddSingleton<AutoReplyService>();
 builder.Services.AddSingleton<WelcomeService>();
 builder.Services.AddSingleton<ModLogService>();
+builder.Services.AddSingleton<TicketService>();
+builder.Services.AddSingleton<ForumService>();
+builder.Services.AddSingleton<DirectMessageService>();
+builder.Services.AddSingleton<AppStatusService>();
+builder.Services.AddSingleton<ServerSetupService>();
+builder.Services.AddHostedService<ForumCleanupService>();
 builder.Services.AddHostedService<DiscordBotService>();
 
 await builder.Build().RunAsync();
