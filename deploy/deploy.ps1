@@ -3,12 +3,13 @@
     Tests, builds and installs the GrepoBot Discord bot on the Raspberry Pi.
 
 .EXAMPLE
-    ./deploy/deploy.ps1
-    ./deploy/deploy.ps1 -Target pi@192.168.1.50
+    ./deploy/deploy.ps1                       # the Pi from deploy/target.local
+    ./deploy/deploy.ps1 -Target pi@grepobot-pi.local
 #>
 param(
-    # SSH login of the Pi (user@host). Set up key login once with the README steps so no password is asked.
-    [string]$Target = "pi@grepobot-pi.local",
+    # SSH login of the Pi (user@host). Without it: $env:GREPOBOT_PI, then deploy/target.local (gitignored, one line).
+    # Set up key login once with the README steps so no password is asked.
+    [string]$Target = "",
 
     # Skip the tests (not recommended).
     [switch]$SkipTests
@@ -16,6 +17,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
+
+if (-not $Target) { $Target = $env:GREPOBOT_PI }
+$targetFile = Join-Path $PSScriptRoot "target.local"
+if (-not $Target -and (Test-Path $targetFile)) { $Target = (Get-Content $targetFile -TotalCount 1).Trim() }
+if (-not $Target) { throw "Which Pi? Pass -Target user@host, set GREPOBOT_PI, or put user@host into deploy/target.local." }
 $out = Join-Path ([System.IO.Path]::GetTempPath()) "grepobot-discord-deploy"
 
 if (-not $SkipTests)

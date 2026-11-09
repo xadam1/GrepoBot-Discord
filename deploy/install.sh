@@ -24,6 +24,25 @@ if ! id grepobot >/dev/null 2>&1; then
     echo "Created system user 'grepobot'."
 fi
 
+# .NET needs ICU (cultures, accent-insensitive auto-replies); the welcome card needs fontconfig and a font.
+# grep without -q: -q stops reading early, ldconfig then gets SIGPIPE and pipefail treats that as "missing".
+MISSING=""
+if ! ldconfig -p | grep 'libicuuc\.so' >/dev/null; then
+    MISSING="$MISSING $(apt-cache search --names-only '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -n 1)"
+fi
+if ! ldconfig -p | grep 'libfontconfig\.so\.1' >/dev/null; then
+    MISSING="$MISSING libfontconfig1"
+fi
+if [ ! -d /usr/share/fonts/truetype/dejavu ]; then
+    MISSING="$MISSING fonts-dejavu-core"
+fi
+if [ -n "$MISSING" ]; then
+    echo "Installing$MISSING..."
+    apt-get update -qq
+    # shellcheck disable=SC2086
+    apt-get install -y -qq $MISSING
+fi
+
 mkdir -p "$APP_DIR" "$ETC_DIR"
 
 if [ -d "$SRC_DIR/app" ]; then

@@ -10,3 +10,6 @@ appsettings.Local.json
 data/
 *.env
 !deploy/*.env.example
+deploy/target.local
+
+.DS_Store
