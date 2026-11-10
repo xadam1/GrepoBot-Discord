@@ -14,6 +14,7 @@ namespace GrepoBot.Discord.Modules;
 [Group("forum", "Feedback forum: post status and setup")]
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageThreads)]
+[RequireStaff]
 public sealed class ForumModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields

@@ -51,10 +51,24 @@ public static class RoleSafety
             return $"{role.Mention} is above the bot's highest role. Move the GrepoBot role above it in Server Settings → Roles.";
         }
 
-        var dangerous = _dangerous.FirstOrDefault(p => role.Permissions.Has(p));
-        if (dangerous != default)
+        var dangerous = FindDangerous(role.Permissions);
+        if (dangerous is not null)
         {
             return $"{role.Mention} has the {dangerous} permission, members must not be able to give it to themselves.";
+        }
+
+        return null;
+    }
+
+    /// <summary>The first permission that lets a member moderate or change the server, or null.</summary>
+    public static GuildPermission? FindDangerous(GuildPermissions permissions)
+    {
+        foreach (var permission in _dangerous)
+        {
+            if (permissions.Has(permission))
+            {
+                return permission;
+            }
         }
 
         return null;

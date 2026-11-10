@@ -259,6 +259,7 @@ public sealed class TicketModule : InteractionModuleBase<SocketInteractionContex
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageGuild)]
 [RequireUserPermission(GuildPermission.ManageGuild)]
+[RequireStaff]
 public sealed class TicketsAdminModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields

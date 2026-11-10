@@ -12,6 +12,7 @@ namespace GrepoBot.Discord.Modules;
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageMessages)]
 [RequireUserPermission(GuildPermission.ManageMessages)]
+[RequireStaff]
 public sealed class PurgeModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields
@@ -85,6 +86,7 @@ public sealed class PurgeModule : InteractionModuleBase<SocketInteractionContext
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageMessages)]
 [RequireUserPermission(GuildPermission.ManageMessages)]
+[RequireStaff]
 public sealed class PurgeConfirmModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields

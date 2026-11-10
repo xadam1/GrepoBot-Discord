@@ -665,3 +665,58 @@ public class AutoReplyDefaultsTests
 
     #endregion
 }
+
+public class StaffAccessTests
+{
+    #region Tests
+
+    [Theory]
+    [InlineData("Moderator")]
+    [InlineData("🛡️・Moderator")]
+    [InlineData("Discord Moderator")]
+    [InlineData("GrepoBot Team")]
+    [InlineData("GrepoBot Developer")]
+    [InlineData("GrepoBot")]
+    public void StaffRoles_HaveAccess(string role)
+    {
+        Assert.True(StaffAccess.IsStaff(false, ["@everyone", "Member", role]));
+    }
+
+    [Theory]
+    [InlineData("Supporter")]
+    [InlineData("Member")]
+    [InlineData("Admin")]
+    [InlineData("GrepoBot Fan")]
+    [InlineData(null)]
+    public void OtherRoles_HaveNoAccess(string? role)
+    {
+        Assert.False(StaffAccess.IsStaff(false, ["@everyone", role]));
+    }
+
+    [Fact]
+    public void Owner_AlwaysHasAccess()
+    {
+        Assert.True(StaffAccess.IsStaff(true, ["@everyone"]));
+    }
+
+    [Fact]
+    public void FindRisks_ReportsOnlyNonStaffRolesWithModeratorRights()
+    {
+        var manageMessages = new global::Discord.GuildPermissions(manageMessages: true);
+        var admin = new global::Discord.GuildPermissions(administrator: true);
+        var plain = new global::Discord.GuildPermissions(sendMessages: true, viewChannel: true);
+
+        var risks = StaffAccess.FindRisks(
+        [
+            ("Moderator", manageMessages, false),
+            ("Helper", manageMessages, false),
+            ("Old Admin", admin, false),
+            ("Member", plain, false),
+            ("Some Integration", admin, true),
+        ]);
+
+        Assert.Equal([("Helper", global::Discord.GuildPermission.ManageMessages), ("Old Admin", global::Discord.GuildPermission.Administrator)], risks);
+    }
+
+    #endregion
+}

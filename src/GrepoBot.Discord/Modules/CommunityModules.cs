@@ -14,6 +14,7 @@ namespace GrepoBot.Discord.Modules;
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageGuild)]
 [RequireUserPermission(GuildPermission.ManageGuild)]
+[RequireStaff]
 public sealed class RulesModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields
@@ -139,6 +140,7 @@ public sealed class RulesModal : IModal
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageGuild)]
 [RequireUserPermission(GuildPermission.ManageGuild)]
+[RequireStaff]
 public sealed class WelcomeModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields
@@ -223,6 +225,7 @@ public sealed class WelcomeModal : IModal
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageRoles)]
 [RequireUserPermission(GuildPermission.ManageRoles)]
+[RequireStaff]
 public sealed class RolesModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Public Methods
@@ -283,6 +286,7 @@ public sealed class RolesModule : InteractionModuleBase<SocketInteractionContext
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageGuild)]
 [RequireUserPermission(GuildPermission.ManageGuild)]
+[RequireStaff]
 public sealed class SetupModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields
@@ -333,6 +337,44 @@ public sealed class SetupModule : InteractionModuleBase<SocketInteractionContext
             .Build();
 
         await RespondAsync(embed: embed, ephemeral: true);
+    }
+
+    [SlashCommand("access", "Check who can use the GrepoBot commands and which roles have moderator rights")]
+    public async Task AccessAsync()
+    {
+        await DeferAsync(ephemeral: true);
+
+        var guild = Context.Guild;
+        await guild.DownloadUsersAsync();
+
+        var staffRoles = guild.Roles
+            .Where(r => StaffAccess.IsStaffRole(r.Name))
+            .OrderByDescending(r => r.Position)
+            .Select(r => $"{r.Mention} · {r.Members.Count()} members")
+            .ToList();
+        var staffMembers = guild.Users
+            .Where(u => !u.IsBot && StaffAccess.IsStaff(guild.OwnerId == u.Id, u.Roles.Select(r => r.Name)))
+            .Select(u => u.Mention)
+            .ToList();
+        var risks = StaffAccess.FindRisks(guild.Roles.Select(r => (r.Name, r.Permissions, r.IsManaged)));
+
+        var riskText = risks.Count == 0
+            ? "✅ none"
+            : Limit(string.Join("\n", risks.Select(r => $"⚠️ **{r.Name}** has {r.Permission}")), 800) +
+              "\nThey cannot use GrepoBot commands, but they can still moderate through Discord itself.";
+
+        var embed = new EmbedBuilder()
+            .WithColor(risks.Count == 0 ? BotBranding.Accent : new Color(0xE67E22))
+            .WithTitle("🔐 Who can use GrepoBot commands")
+            .WithDescription("The server owner and the **Moderator**, **GrepoBot Team** and **GrepoBot** roles. " +
+                "Everyone else gets ⛔, even with Discord permissions. Members can still use `/about`, the buttons " +
+                "for rules, roles and tickets, and `/ticket close` in their own ticket.")
+            .AddField("Staff roles", staffRoles.Count == 0 ? "⚠️ none found, only the owner has access" : string.Join("\n", staffRoles))
+            .AddField($"Staff members ({staffMembers.Count})", staffMembers.Count == 0 ? "nobody" : Limit(string.Join(", ", staffMembers), 1000))
+            .AddField("Other roles with moderator rights", riskText)
+            .Build();
+
+        await FollowupAsync(embed: embed, ephemeral: true, allowedMentions: AllowedMentions.None);
     }
 
     [SlashCommand("log-channel", "Channel for the moderation log (leave empty to turn it off)")]
@@ -388,6 +430,12 @@ public sealed class SetupModule : InteractionModuleBase<SocketInteractionContext
     private static string Channel(ulong? id)
     {
         return id is null ? "off" : $"<#{id}>";
+    }
+
+    /// <summary>Embed fields hold 1024 characters.</summary>
+    private static string Limit(string text, int maxLength)
+    {
+        return text.Length <= maxLength ? text : text[..maxLength] + " …";
     }
 
     #endregion

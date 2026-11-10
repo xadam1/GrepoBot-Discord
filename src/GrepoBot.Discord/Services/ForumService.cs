@@ -46,10 +46,10 @@ public sealed class ForumService
 
     #region Public Methods
 
-    /// <summary>Team = Manage Threads (the permission Discord requires for moderator-only tags), or ticket staff.</summary>
+    /// <summary>Team = the owner, the Moderator / GrepoBot Team roles or the ticket staff roles.</summary>
     public bool IsStaff(SocketGuildUser user)
     {
-        return user.GuildPermissions.ManageThreads || _tickets.IsStaff(user);
+        return _tickets.IsStaff(user);
     }
 
     /// <summary>

@@ -13,6 +13,7 @@ namespace GrepoBot.Discord.Modules;
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.Administrator)]
 [RequireUserPermission(GuildPermission.Administrator)]
+[RequireStaff]
 public sealed class ServerModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields
@@ -108,6 +109,7 @@ public sealed class ServerModule : InteractionModuleBase<SocketInteractionContex
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageThreads)]
 [RequireUserPermission(GuildPermission.ManageThreads)]
+[RequireStaff]
 public sealed class StatusModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields

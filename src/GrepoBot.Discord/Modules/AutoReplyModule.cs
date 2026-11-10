@@ -15,6 +15,7 @@ namespace GrepoBot.Discord.Modules;
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageGuild)]
 [RequireUserPermission(GuildPermission.ManageGuild)]
+[RequireStaff]
 public sealed partial class AutoReplyModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields

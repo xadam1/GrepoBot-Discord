@@ -27,7 +27,7 @@ GrepoBot.Discord is the community bot of the GrepoBot Discord server (the deskto
 ## Conventions
 
 - Same style as the GrepoBot app: Allman braces, no one-line `if`/`foreach`, `#region` blocks (`Private Fields`, `Properties`, `Constructor`, `Public Methods`, `Private Methods`, `Helpers`), `_camelCase` private fields.
-- Admin commands: `[DefaultMemberPermissions]` (hides them) **and** `[RequireUserPermission]` (enforces it, also for buttons). Member-facing buttons live in `PublicModule` (ticket buttons in `TicketButtonsModule`, which checks owner/staff itself).
+- Admin commands: `[DefaultMemberPermissions]` (hides them), `[RequireUserPermission]` (enforces it, also for buttons) **and** `[RequireStaff]` (owner or Moderator / GrepoBot Team / GrepoBot role, `Logic/StaffAccess`). Member-facing buttons live in `PublicModule` (ticket buttons in `TicketButtonsModule`, which checks owner/staff itself).
 - Custom IDs are `name:arg:arg`, args are IDs or slug names only (no `:`), max 100 characters.
 - Every role the bot hands out goes through `RoleSafety.GetProblem`.
 - Cards are Components v2 (`ComponentBuilderV2`, `MessageFlags.ComponentsV2`): no content or embeds, max 4000 characters of text per message. Set role colors with `RoleProperties.Colors`, `Color` alone is ignored by Discord.

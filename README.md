@@ -23,9 +23,9 @@ The community bot of the GrepoBot Discord server. It runs on a Raspberry Pi 3B+ 
 | **Moderation log** | `/setup log-channel` logs deleted and edited messages, joins (with a warning for accounts younger than 7 days), leaves, bans and unbans. |
 | **Server setup** | `/server setup` (Administrator) shows a preview of what it would change, **Apply** does it: roles (GrepoBot Team gold, Moderator green, Supporter pink, shown separately right below the bot; old roles *Contributor*, *WebMaster* and *Bot* are deleted), the channel layout below, the rules, both forums, tickets, the welcome channel, the permanent invite, the status card and the links card. Running it again only fixes what differs. |
 | **App status** | `/status set state:[Working ✅ · Not working ❌ · Maintenance 🔧] [note] [announce]` (Manage Threads) updates the pinned status card in 📡 bot-status and the channel's emoji (Discord allows two renames per 10 minutes). `announce` also posts a short new message. |
-| **Settings & look** | `/setup show · updates-role · auto-publish · branding` (sets the bot's avatar and profile banner). `/about` for everyone. |
+| **Settings & look** | `/setup show · access · updates-role · auto-publish · branding` (sets the bot's avatar and profile banner). `/about` for everyone. |
 
-All admin commands are hidden from members who lack *Manage Server* (purge: *Manage Messages*, roles: *Manage Roles*); you can fine-tune who sees which command in **Server Settings → Integrations → GrepoBot**.
+All admin commands are hidden from members who lack *Manage Server* (purge: *Manage Messages*, roles: *Manage Roles*), and only the server owner and the **Moderator**, **GrepoBot Team** and **GrepoBot** roles can run them; anyone else gets ⛔ even with those permissions. `/setup access` lists who has access and warns about other roles with moderator rights.
 
 ## 1. Create the Discord application
 

@@ -16,6 +16,7 @@ namespace GrepoBot.Discord.Modules;
 [CommandContextType(InteractionContextType.Guild)]
 [DefaultMemberPermissions(GuildPermission.ManageGuild)]
 [RequireUserPermission(GuildPermission.ManageGuild)]
+[RequireStaff]
 public sealed class PostModule : InteractionModuleBase<SocketInteractionContext>
 {
     #region Private Fields

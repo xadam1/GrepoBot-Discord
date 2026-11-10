@@ -69,10 +69,10 @@ public sealed class TicketService
         return _store.Read(state => state.Tickets.Tickets.FirstOrDefault(t => t.ChannelId == channelId)?.Clone());
     }
 
-    /// <summary>Staff = one of the ticket staff roles, or Manage Server.</summary>
+    /// <summary>Staff = one of the ticket staff roles, or the owner and the Moderator / GrepoBot Team roles.</summary>
     public bool IsStaff(SocketGuildUser user)
     {
-        if (user.GuildPermissions.ManageGuild)
+        if (StaffAccess.IsStaff(user.Guild.OwnerId == user.Id, user.Roles.Select(r => r.Name)))
         {
             return true;
         }
