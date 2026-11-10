@@ -602,3 +602,55 @@ public class MentionReplyTests
 
     #endregion
 }
+
+public class AutoReplyDefaultsTests
+{
+    #region Tests
+
+    [Fact]
+    public void EveryDefault_IsAValidCard()
+    {
+        var rules = AutoReplyDefaults.Create();
+
+        Assert.Equal(rules.Count, rules.Select(r => r.Name).Distinct().Count());
+        Assert.All(rules, rule =>
+        {
+            Assert.Matches("^[a-z0-9_-]{1,32}$", rule.Name);
+            Assert.NotEmpty(rule.Keywords);
+            Assert.False(string.IsNullOrWhiteSpace(rule.Title));
+            Assert.True(rule.Response.Length <= 3500);
+            Assert.InRange(rule.Buttons.Count, 1, AutoReplyButtons.MAX_BUTTONS);
+            Assert.Null(AutoReplyButtons.Parse(AutoReplyButtons.Format(rule.Buttons)).Error);
+            Assert.DoesNotContain("version", rule.Title + rule.Response, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public void EveryChannelPlaceholder_IsAServerLayoutChannel()
+    {
+        var channels = ServerLayout.Categories.SelectMany(c => c.Channels).Select((c, i) => ((ulong)i + 1, c.Name)).ToList();
+        var texts = AutoReplyDefaults.Create().SelectMany(r => r.Buttons.Select(b => b.Target).Append(r.Response));
+
+        Assert.All(texts, text => Assert.DoesNotContain("{#", ServerLayout.RenderChannelMentions(text, channels)));
+    }
+
+    [Theory]
+    [InlineData("where can I download GrepoBot?", "download")]
+    [InlineData("jak to nainstalovat na mac", "download")]
+    [InlineData("the bot is not working since yesterday", "not-working")]
+    [InlineData("farmeni mi nefunguje", "not-working")]
+    [InlineData("macOS says GrepoBot is damaged and can't be opened", "macos-open")]
+    [InlineData("how do I update the bot?", "update")]
+    [InlineData("what's new in the bot?", "changelog")]
+    [InlineData("can it farm villages automatically?", "features")]
+    [InlineData("I have an idea for the builder", "ideas-bugs")]
+    [InlineData("does anyone want to share template for a defensive town", "templates")]
+    [InlineData("kde najdu pravidla?", "rules")]
+    [InlineData("good morning everyone", null)]
+    public void CommonQuestions_GetTheRightAnswer(string question, string? expected)
+    {
+        Assert.Equal(expected, KeywordMatcher.FindMatch(AutoReplyDefaults.Create(), question)?.Name);
+    }
+
+    #endregion
+}

@@ -156,6 +156,31 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
         await FollowupAsync(components: BuildPreview(rule), ephemeral: true, flags: MessageFlags.ComponentsV2);
     }
 
+    [SlashCommand("defaults", "Add the basic answers (download, help, updates, features, …); existing names are kept")]
+    public async Task DefaultsAsync()
+    {
+        var defaults = AutoReplyDefaults.Create();
+        var added = _store.Update(state =>
+        {
+            var names = state.AutoReply.Rules.Select(r => r.Name).ToHashSet();
+            var missing = defaults.Where(rule => !names.Contains(rule.Name)).ToList();
+            state.AutoReply.Rules.AddRange(missing);
+            return missing.Select(rule => rule.Name).ToList();
+        });
+
+        var skipped = defaults.Select(rule => rule.Name).Except(added).ToList();
+        var text = added.Count == 0
+            ? "Nothing to add, all basic answers already exist."
+            : $"✅ Added {added.Count} answers: {FormatKeywords(added)}";
+        if (skipped.Count > 0)
+        {
+            text += $"\n-# Kept your existing {FormatKeywords(skipped)}. Delete one with `/autoreply remove` and run this again to get the default.";
+        }
+
+        text += "\n-# See each card with `/autoreply show`, change it with `/autoreply edit`.";
+        await RespondAsync(text, ephemeral: true);
+    }
+
     [SlashCommand("remove", "Delete an automatic answer")]
     public async Task RemoveAsync([Summary(description: "The answer to delete"), Autocomplete(typeof(AutoReplyNameAutocomplete))] string name)
     {
