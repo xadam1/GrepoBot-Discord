@@ -76,20 +76,14 @@ public sealed class AutoReplyService
             return;
         }
 
-        var response = TextTemplate.Render(rule.Response, new Dictionary<string, string>
+        var card = AutoReplyCard.Build(channel.Guild, rule, settings.Footer, new Dictionary<string, string>
         {
             ["user"] = message.Author.Mention,
             ["username"] = message.Author.GlobalName ?? message.Author.Username,
             ["server"] = channel.Guild.Name,
         });
 
-        var embed = new EmbedBuilder()
-            .WithColor(BotBranding.Accent)
-            .WithDescription(response)
-            .WithFooter(settings.Footer)
-            .Build();
-
-        await userMessage.ReplyAsync(embed: embed, allowedMentions: AllowedMentions.None);
+        await userMessage.ReplyAsync(components: card, allowedMentions: AllowedMentions.None, flags: MessageFlags.ComponentsV2);
 
         _store.Update(state =>
         {

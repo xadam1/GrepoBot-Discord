@@ -87,6 +87,26 @@ public class StateStoreTests : IDisposable
     }
 
     [Fact]
+    public void AnswerCard_IsSavedAndLoadedAgain()
+    {
+        var path = Path.Combine(_directory, "state.json");
+        var store = new StateStore(path, NullLogger<StateStore>.Instance);
+
+        store.Update(state => state.AutoReply.Rules.Add(new AutoReplyRule
+        {
+            Name = "download",
+            Title = "⬇️ Download",
+            Buttons = [new AutoReplyButtonSpec("Get help", "{#tickets}")],
+            ImageUrl = "https://grepobot.net/a.png",
+        }));
+
+        var rule = new StateStore(path, NullLogger<StateStore>.Instance).Read(s => s.AutoReply.Rules.Single());
+        Assert.Equal("⬇️ Download", rule.Title);
+        Assert.Equal(new AutoReplyButtonSpec("Get help", "{#tickets}"), rule.Buttons.Single());
+        Assert.Equal("https://grepobot.net/a.png", rule.ImageUrl);
+    }
+
+    [Fact]
     public void BrokenFile_IsKeptAsBackup_AndDefaultsAreUsed()
     {
         Directory.CreateDirectory(_directory);
@@ -473,6 +493,111 @@ public class ReleaseNotesTests
         var png = GrepoBot.Discord.Services.WelcomeCard.RenderRelease("1.4.0", "Building is back!", DateTimeOffset.UtcNow);
 
         Assert.True(png.Length > 1000);
+    }
+
+    #endregion
+}
+
+public class ChannelMentionTests
+{
+    #region Tests
+
+    [Fact]
+    public void LayoutKeysAliasesAndNames_BecomeMentions()
+    {
+        (ulong, string)[] channels = [(1, "🆘・support-ticket"), (2, "📡・bot-status"), (3, "📑・rules")];
+
+        var text = ServerLayout.RenderChannelMentions("Open {#tickets}, see {#bot-status} and {#RULES}.", channels);
+
+        Assert.Equal("Open <#1>, see <#2> and <#3>.", text);
+    }
+
+    [Fact]
+    public void UnknownOrMissingChannels_StayVisible()
+    {
+        (ulong, string)[] channels = [(1, "💬・general")];
+
+        var text = ServerLayout.RenderChannelMentions("{#tickets} {#nope} {user}", channels);
+
+        Assert.Equal("{#tickets} {#nope} {user}", text);
+    }
+
+    #endregion
+}
+
+public class AutoReplyButtonsTests
+{
+    #region Tests
+
+    [Fact]
+    public void Lines_BecomeButtons()
+    {
+        var (buttons, error) = AutoReplyButtons.Parse("⬇️ Download | https://grepobot.net/download/\n\n🎫 Get help | {#tickets}");
+
+        Assert.Null(error);
+        Assert.Equal(
+            [new AutoReplyButtonSpec("⬇️ Download", "https://grepobot.net/download/"), new AutoReplyButtonSpec("🎫 Get help", "{#tickets}")],
+            buttons);
+        Assert.Equal("⬇️ Download | https://grepobot.net/download/\n🎫 Get help | {#tickets}", AutoReplyButtons.Format(buttons));
+    }
+
+    [Theory]
+    [InlineData("Download")]
+    [InlineData("Download | grepobot.net")]
+    [InlineData(" | https://grepobot.net")]
+    [InlineData("a | https://a.cz\nb | https://a.cz\nc | https://a.cz\nd | https://a.cz\ne | https://a.cz\nf | https://a.cz")]
+    public void InvalidLines_AreRefused(string input)
+    {
+        Assert.NotNull(AutoReplyButtons.Parse(input).Error);
+    }
+
+    [Fact]
+    public void EmptyInput_HasNoButtons()
+    {
+        Assert.Empty(AutoReplyButtons.Parse(null).Buttons);
+        Assert.Empty(AutoReplyButtons.Parse("  ").Buttons);
+    }
+
+    [Fact]
+    public void ChannelButtons_LinkTheChannel_AndMissingChannelsAreDropped()
+    {
+        (ulong, string)[] channels = [(7, "🆘・support-ticket")];
+
+        Assert.Equal("https://discord.com/channels/1/7",
+            AutoReplyButtons.ResolveUrl(new AutoReplyButtonSpec("Help", "{#tickets}"), 1, channels));
+        Assert.Null(AutoReplyButtons.ResolveUrl(new AutoReplyButtonSpec("Rules", "{#rules}"), 1, channels));
+        Assert.Equal("https://grepobot.net/",
+            AutoReplyButtons.ResolveUrl(new AutoReplyButtonSpec("Web", "https://grepobot.net/"), 1, channels));
+    }
+
+    #endregion
+}
+
+public class MentionReplyTests
+{
+    #region Tests
+
+    [Theory]
+    [InlineData("hey <@10> how do I farm?", true)]
+    [InlineData("<@!10>", true)]
+    [InlineData("ping <@&20> please", true)]
+    [InlineData("thanks!", false)]
+    [InlineData("hey <@11>", false)]
+    [InlineData("<@&21>", false)]
+    public void OnlyExplicitTagsOfTheBotCount(string content, bool expected)
+    {
+        Assert.Equal(expected, GrepoBot.Discord.Services.MentionReplyService.IsBotTagged(content, 10, [20]));
+    }
+
+    [Fact]
+    public void MentionText_SaysItIsABot_AndLinksTicketsAndForum()
+    {
+        var text = GrepoBot.Discord.Services.BotIntroCard.BuildText("GrepoBot", 5, 6, isMention: true);
+
+        Assert.Contains("can't answer questions", text);
+        Assert.Contains("<#5>", text);
+        Assert.Contains("<#6>", text);
+        Assert.DoesNotContain("version", text, StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion

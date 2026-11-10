@@ -55,6 +55,7 @@ builder.Services.AddSingleton<ModLogService>();
 builder.Services.AddSingleton<TicketService>();
 builder.Services.AddSingleton<ForumService>();
 builder.Services.AddSingleton<DirectMessageService>();
+builder.Services.AddSingleton<MentionReplyService>();
 builder.Services.AddSingleton<AppStatusService>();
 builder.Services.AddSingleton<ServerSetupService>();
 builder.Services.AddHostedService<ForumCleanupService>();

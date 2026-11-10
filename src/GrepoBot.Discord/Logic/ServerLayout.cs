@@ -5,7 +5,7 @@ namespace GrepoBot.Discord.Logic;
 /// templates forum. Existing roles and channels are found by name (the part after "・", without emoji) or by
 /// an older name, so running it again or on a server with the old layout renames instead of duplicating.
 /// </summary>
-public static class ServerLayout
+public static partial class ServerLayout
 {
     #region Properties
 
@@ -133,6 +133,50 @@ public static class ServerLayout
         return Categories.SelectMany(c => c.Channels).First(c => c.Key == key);
     }
 
+    /// <summary>
+    /// Replaces <c>{#key}</c> placeholders with channel mentions, e.g. <c>{#tickets}</c> → <c>&lt;#123&gt;</c>.
+    /// A key is a layout key (<c>tickets</c>, <c>status</c>, <c>rules</c>, …), one of its aliases or the channel's
+    /// name without the emoji (<c>support-ticket</c>). Unknown placeholders are left untouched so a typo stays visible.
+    /// </summary>
+    public static string RenderChannelMentions(string text, IEnumerable<(ulong Id, string Name)> channels)
+    {
+        var channelList = channels.ToList();
+
+        return ChannelPlaceholder().Replace(text, match =>
+        {
+            var id = FindChannelId(match.Groups[1].Value, channelList);
+            return id is null ? match.Value : $"<#{id}>";
+        });
+    }
+
+    /// <summary>
+    /// The channel a placeholder key stands for: a layout key (<c>tickets</c>), one of its aliases or the channel's
+    /// name without the emoji. Null when the server has no such channel.
+    /// </summary>
+    public static ulong? FindChannelId(string key, IEnumerable<(ulong Id, string Name)> channels)
+    {
+        key = key.Trim().ToLowerInvariant();
+        var spec = Categories.SelectMany(c => c.Channels).FirstOrDefault(c => c.Key == key || c.Aliases.Contains(key));
+        var aliases = spec is null ? [key] : spec.Aliases.Append(key).ToArray();
+
+        foreach (var (id, name) in channels)
+        {
+            if (Matches(name, aliases))
+            {
+                return id;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The key of a <c>{#key}</c> placeholder that is the whole text, or null.</summary>
+    public static string? ChannelPlaceholderKey(string text)
+    {
+        var match = ChannelPlaceholder().Match(text.Trim());
+        return match.Success && match.Length == text.Trim().Length ? match.Groups[1].Value : null;
+    }
+
     /// <summary>The rules with the channel mentions filled in.</summary>
     public static string RenderRules(IReadOnlyDictionary<string, ulong> channelIds)
     {
@@ -144,6 +188,10 @@ public static class ServerLayout
     {
         return emoji + "・bot-status";
     }
+
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\{#([a-z0-9_-]{1,40})\}", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex ChannelPlaceholder();
 
     #endregion
 }

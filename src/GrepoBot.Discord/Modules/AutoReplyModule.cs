@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Discord;
 using Discord.Interactions;
 using GrepoBot.Discord.Logic;
+using GrepoBot.Discord.Services;
 using GrepoBot.Discord.State;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -72,12 +73,18 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
 
         var keywords = string.Join("\n", rule.Keywords);
         var response = rule.Response;
+        var title = rule.Title ?? string.Empty;
+        var buttons = AutoReplyButtons.Format(rule.Buttons);
+        var image = rule.ImageUrl ?? string.Empty;
         await RespondWithModalAsync<AutoReplyModal>(
             $"{SAVE_ID}:edit:{rule.Name}:{mode ?? rule.Mode}:{cooldown ?? rule.CooldownSeconds}",
             modifyModal: builder =>
             {
                 builder.UpdateTextInput(AutoReplyModal.KEYWORDS_ID, input => input.Value = keywords);
                 builder.UpdateTextInput(AutoReplyModal.RESPONSE_ID, input => input.Value = response);
+                builder.UpdateTextInput(AutoReplyModal.TITLE_ID, input => input.Value = title);
+                builder.UpdateTextInput(AutoReplyModal.BUTTONS_ID, input => input.Value = buttons);
+                builder.UpdateTextInput(AutoReplyModal.IMAGE_ID, input => input.Value = image);
             });
     }
 
@@ -98,12 +105,29 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
             return;
         }
 
+        var (buttons, buttonError) = AutoReplyButtons.Parse(modal.Buttons);
+        if (buttonError is not null)
+        {
+            await RespondAsync($"❌ Buttons: {buttonError}", ephemeral: true);
+            return;
+        }
+
+        var imageUrl = string.IsNullOrWhiteSpace(modal.ImageUrl) ? null : modal.ImageUrl.Trim();
+        if (imageUrl is not null && !AutoReplyButtons.IsWebAddress(imageUrl))
+        {
+            await RespondAsync("❌ The image must be a web address starting with `https://`.", ephemeral: true);
+            return;
+        }
+
         var rule = new AutoReplyRule
         {
             Name = name,
             Keywords = keywords,
             Mode = mode,
+            Title = string.IsNullOrWhiteSpace(modal.Title) ? null : modal.Title.Trim(),
             Response = modal.Response.Trim(),
+            Buttons = buttons,
+            ImageUrl = imageUrl,
             CooldownSeconds = int.Parse(cooldownText),
         };
 
@@ -118,14 +142,18 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
 
             existing.Keywords = rule.Keywords;
             existing.Mode = rule.Mode;
+            existing.Title = rule.Title;
             existing.Response = rule.Response;
+            existing.Buttons = rule.Buttons;
+            existing.ImageUrl = rule.ImageUrl;
             existing.CooldownSeconds = rule.CooldownSeconds;
         });
 
         var verb = kind == "new" ? "Added" : "Updated";
         await RespondAsync(
-            $"✅ {verb} `{name}` ({mode}, cooldown {rule.CooldownSeconds}s). Keywords: {FormatKeywords(keywords)}\n-# Try it with `/autoreply test`.",
+            $"✅ {verb} `{name}` ({mode}, cooldown {rule.CooldownSeconds}s). Keywords: {FormatKeywords(keywords)}\n-# This is how it looks, only you can see it:",
             ephemeral: true);
+        await FollowupAsync(components: BuildPreview(rule), ephemeral: true, flags: MessageFlags.ComponentsV2);
     }
 
     [SlashCommand("remove", "Delete an automatic answer")]
@@ -196,7 +224,7 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
         await RespondAsync(embed: embed.Build(), ephemeral: true);
     }
 
-    [SlashCommand("show", "Show the full answer text")]
+    [SlashCommand("show", "Show the answer card as members see it (only you can see it)")]
     public async Task ShowAsync([Summary(description: "The answer to show"), Autocomplete(typeof(AutoReplyNameAutocomplete))] string name)
     {
         var rule = FindRule(name);
@@ -206,14 +234,10 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
             return;
         }
 
-        var embed = new EmbedBuilder()
-            .WithColor(BotBranding.Accent)
-            .WithTitle(rule.Name)
-            .WithDescription(rule.Response)
-            .AddField("Keywords", Shorten(FormatKeywords(rule.Keywords), 1024))
-            .WithFooter($"{rule.Mode} · cooldown {rule.CooldownSeconds}s · used {rule.TimesUsed}×");
-
-        await RespondAsync(embed: embed.Build(), ephemeral: true);
+        await RespondAsync(
+            $"**{rule.Name}** · {rule.Mode} · cooldown {rule.CooldownSeconds}s · used {rule.TimesUsed}×\nKeywords: {Shorten(FormatKeywords(rule.Keywords), 1500)}",
+            ephemeral: true);
+        await FollowupAsync(components: BuildPreview(rule), ephemeral: true, flags: MessageFlags.ComponentsV2);
     }
 
     [SlashCommand("test", "Check which answer a message would get")]
@@ -221,9 +245,14 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
     {
         var rules = _store.Read(state => state.AutoReply.Rules.ToList());
         var match = KeywordMatcher.FindMatch(rules, text);
-        await RespondAsync(
-            match is null ? "No answer matches this text." : $"✅ `{match.Name}` would answer:\n>>> {match.Response}",
-            ephemeral: true);
+        if (match is null)
+        {
+            await RespondAsync("No answer matches this text.", ephemeral: true);
+            return;
+        }
+
+        await RespondAsync($"✅ `{match.Name}` would answer:", ephemeral: true);
+        await FollowupAsync(components: BuildPreview(match), ephemeral: true, flags: MessageFlags.ComponentsV2);
     }
 
     [SlashCommand("ignore", "Never auto-reply in a channel or category (run again to undo)")]
@@ -271,6 +300,18 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
 
     #region Private Methods
 
+    /// <summary>The answer card exactly as a member would get it, with this member's name filled in.</summary>
+    private MessageComponent BuildPreview(AutoReplyRule rule)
+    {
+        var footer = _store.Read(state => state.AutoReply.Footer);
+        return AutoReplyCard.Build(Context.Guild, rule, footer, new Dictionary<string, string>
+        {
+            ["user"] = Context.User.Mention,
+            ["username"] = Context.User.GlobalName ?? Context.User.Username,
+            ["server"] = Context.Guild.Name,
+        });
+    }
+
     private AutoReplyRule? FindRule(string name)
     {
         return _store.Read(state => state.AutoReply.Rules.FirstOrDefault(r => r.Name == name));
@@ -292,23 +333,41 @@ public sealed partial class AutoReplyModule : InteractionModuleBase<SocketIntera
     #endregion
 }
 
-/// <summary>The form for keywords and the answer.</summary>
+/// <summary>The form for keywords and the answer card.</summary>
 public sealed class AutoReplyModal : IModal
 {
     #region Properties
 
     public const string KEYWORDS_ID = "keywords";
+    public const string TITLE_ID = "title";
     public const string RESPONSE_ID = "response";
+    public const string BUTTONS_ID = "buttons";
+    public const string IMAGE_ID = "image";
 
-    public string Title => "Automatic answer";
+    string IModal.Title => "Automatic answer";
 
     [InputLabel("Keywords", "One per line or comma separated. word* matches word endings. Case and accents are ignored.")]
     [ModalTextInput(KEYWORDS_ID, TextInputStyle.Paragraph, "install*, download, setup\nhow to start", maxLength: 1000)]
     public string Keywords { get; set; } = string.Empty;
 
-    [InputLabel("Answer", "Markdown. Placeholders: {user} {username} {server}")]
-    [ModalTextInput(RESPONSE_ID, TextInputStyle.Paragraph, "Download GrepoBot from https://grepobot.net and …", maxLength: 4000)]
+    [InputLabel("Headline", "Optional big title of the card, e.g. ⬇️ Download GrepoBot")]
+    [ModalTextInput(TITLE_ID, TextInputStyle.Short, "⬇️ Download GrepoBot", maxLength: 100)]
+    [RequiredInput(false)]
+    public string? Title { get; set; }
+
+    [InputLabel("Answer", "Markdown. {user} {username} {server}, channels: {#tickets} {#status} {#rules}")]
+    [ModalTextInput(RESPONSE_ID, TextInputStyle.Paragraph, "Download GrepoBot from https://grepobot.net and …", maxLength: 3500)]
     public string Response { get; set; } = string.Empty;
+
+    [InputLabel("Buttons", "Optional, one per line: Label | https://… or Label | {#tickets} (max 5)")]
+    [ModalTextInput(BUTTONS_ID, TextInputStyle.Paragraph, "⬇️ Download | https://grepobot.net/download/\n🎫 Get help | {#tickets}", maxLength: 1000)]
+    [RequiredInput(false)]
+    public string? Buttons { get; set; }
+
+    [InputLabel("Image", "Optional https address of an image shown in the card")]
+    [ModalTextInput(IMAGE_ID, TextInputStyle.Short, "https://grepobot.net/…/screenshot.png", maxLength: 500)]
+    [RequiredInput(false)]
+    public string? ImageUrl { get; set; }
 
     #endregion
 }

@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using Discord;
 using Discord.WebSocket;
 using GrepoBot.Discord.Configuration;
-using GrepoBot.Discord.Logic;
 using GrepoBot.Discord.State;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -63,14 +62,16 @@ public sealed class DirectMessageService
         var links = _store.Read(state => new { Tickets = state.Tickets.PanelChannelId, Forum = state.Forum.ChannelId });
         var name = (message.Author as IGuildUser)?.DisplayName ?? message.Author.GlobalName ?? message.Author.Username;
 
-        var embed = new EmbedBuilder()
-            .WithColor(BotBranding.Accent)
-            .WithTitle($"Hi {name}, thank you for your message! 👋")
-            .WithDescription(BuildText(guild?.Name ?? "GrepoBot", links.Tickets, links.Forum))
-            .WithFooter("This is an automatic reply, messages sent here are not read.")
-            .Build();
+        var card = BotIntroCard.Build(
+            _client.CurrentUser.GetDisplayAvatarUrl(ImageFormat.Png, 256),
+            name,
+            guild?.Name ?? "GrepoBot",
+            _guildId,
+            links.Tickets,
+            links.Forum,
+            isMention: false);
 
-        await message.Channel.SendMessageAsync(embed: embed, allowedMentions: AllowedMentions.None);
+        await message.Channel.SendMessageAsync(components: card, allowedMentions: AllowedMentions.None, flags: MessageFlags.ComponentsV2);
         _logger.LogInformation("Answered a direct message from {User}.", message.Author.Username);
     }
 
@@ -80,16 +81,7 @@ public sealed class DirectMessageService
 
     internal static string BuildText(string serverName, ulong? ticketChannelId, ulong? forumChannelId)
     {
-        var tickets = ticketChannelId is { } t ? $"<#{t}>" : "the support channel";
-        var forum = forumChannelId is { } f ? $"<#{f}>" : "the feedback forum";
-
-        return
-            $"I'm the helper bot of the **{serverName}** Discord server, so I can't read or answer messages here. " +
-            "But we'd love to help you:\n\n" +
-            $"🎫 **Need 1-on-1 help?** Open a ticket in {tickets}. Only you and the team can see it, and we'll answer you there as soon as we can.\n\n" +
-            $"💡 **Have an idea or found a bug?** Create a post in {forum}, so others can vote on it and the team can track it.\n\n" +
-            "💬 **Just a quick question?** Feel free to ask in the server chat, the community is happy to help.\n\n" +
-            "Thanks for using GrepoBot! 🙂";
+        return BotIntroCard.BuildText(serverName, ticketChannelId, forumChannelId, isMention: false);
     }
 
     #endregion

@@ -29,6 +29,7 @@ public sealed class DiscordBotService : IHostedService
     private readonly TicketService _tickets;
     private readonly ForumService _forum;
     private readonly DirectMessageService _directMessages;
+    private readonly MentionReplyService _mentionReplies;
     private readonly ILogger<DiscordBotService> _logger;
     private bool _commandsRegistered;
     private int _statusRotationStarted;
@@ -48,6 +49,7 @@ public sealed class DiscordBotService : IHostedService
         TicketService tickets,
         ForumService forum,
         DirectMessageService directMessages,
+        MentionReplyService mentionReplies,
         ILogger<DiscordBotService> logger)
     {
         _client = client;
@@ -60,6 +62,7 @@ public sealed class DiscordBotService : IHostedService
         _tickets = tickets;
         _forum = forum;
         _directMessages = directMessages;
+        _mentionReplies = mentionReplies;
         _logger = logger;
     }
 
@@ -89,6 +92,7 @@ public sealed class DiscordBotService : IHostedService
 
         _client.MessageReceived += message => RunSafe(() => _autoReply.HandleMessageAsync(message), "auto-reply");
         _client.MessageReceived += message => RunSafe(() => _directMessages.HandleMessageAsync(message), "direct message");
+        _client.MessageReceived += message => RunSafe(() => _mentionReplies.HandleMessageAsync(message), "mention reply");
         _client.UserJoined += user => RunSafe(() => OnUserJoinedAsync(user), "member join");
         _client.UserLeft += (guild, user) => RunSafe(() => _modLog.OnUserLeftAsync(guild, user), "member leave");
         _client.UserBanned += (user, guild) => RunSafe(() => _modLog.OnUserBannedAsync(user, guild), "ban");

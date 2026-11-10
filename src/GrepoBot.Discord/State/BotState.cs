@@ -260,7 +260,16 @@ public sealed class AutoReplyRule
 
     public MatchMode Mode { get; set; } = MatchMode.Any;
 
+    /// <summary>Optional headline of the answer card.</summary>
+    public string? Title { get; set; }
+
     public string Response { get; set; } = string.Empty;
+
+    /// <summary>Link buttons under the answer (web addresses or <c>{#channel}</c> placeholders).</summary>
+    public List<GrepoBot.Discord.Logic.AutoReplyButtonSpec> Buttons { get; set; } = [];
+
+    /// <summary>Optional image shown in the answer card (https address of a png, jpg, gif or webp).</summary>
+    public string? ImageUrl { get; set; }
 
     /// <summary>Minimum time between two answers of this rule in the same channel.</summary>
     public int CooldownSeconds { get; set; } = 300;
