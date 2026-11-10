@@ -114,14 +114,20 @@ public static partial class ServerLayout
     #region Public Methods
 
     /// <summary>"💬・general" → "general", "╭──・💡Important💡・──╮" → "important", "Discord Moderator" → "discord moderator".</summary>
-    public static string Slug(string name)
+    /// <remarks>Discord.Net can cache channels without a name (e.g. threads it only knows by ID), those give "".</remarks>
+    public static string Slug(string? name)
     {
+        if (string.IsNullOrEmpty(name))
+        {
+            return string.Empty;
+        }
+
         var dot = name.IndexOf('・');
         var text = dot >= 0 ? name[(dot + 1)..] : name;
         return new string(text.ToLowerInvariant().Where(c => char.IsLetterOrDigit(c) || c is '-' or ' ').ToArray()).Trim();
     }
 
-    public static bool Matches(string existingName, IEnumerable<string> aliases)
+    public static bool Matches(string? existingName, IEnumerable<string> aliases)
     {
         var slug = Slug(existingName);
         return aliases.Any(a => a == slug);

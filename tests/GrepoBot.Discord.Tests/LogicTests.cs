@@ -522,6 +522,17 @@ public class ChannelMentionTests
         Assert.Equal("{#tickets} {#nope} {user}", text);
     }
 
+    [Fact]
+    public void ChannelsWithoutName_AreSkipped()
+    {
+        // Discord.Net caches some channels (e.g. threads known only by ID) without a name
+        (ulong, string)[] channels = [(9, null!), (1, "🆘・support-ticket")];
+
+        var text = ServerLayout.RenderChannelMentions("Open {#tickets} or {#status}.", channels);
+
+        Assert.Equal("Open <#1> or {#status}.", text);
+    }
+
     #endregion
 }
 
